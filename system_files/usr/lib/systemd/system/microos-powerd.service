@@ -1,0 +1,38 @@
+[Unit]
+Description=MicroOS power profiles and CPU and GPU limits
+Before=display-manager.service
+StartLimitIntervalSec=120
+StartLimitBurst=30
+
+[Service]
+Type=dbus
+BusName=net.seilent.MicroOs.Power
+ExecStart=/usr/libexec/microos/microos-powerd
+Restart=always
+RestartSec=1
+RestartSteps=3
+RestartMaxDelaySec=10
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+DevicePolicy=closed
+DeviceAllow=char-input r
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ReadWritePaths=/sys/devices/system/cpu -/sys/class/devfreq/3d00000.gpu /sys/fs/cgroup /run/microos/hold -/sys/devices/platform/soc@0/3d00000.gpu/gpu_levels
+RuntimeDirectory=microos/gpu-undervolt
+RuntimeDirectoryPreserve=restart
+StateDirectory=microos/gpu-undervolt
+InaccessiblePaths=-/dev/shm -/dev/mqueue
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

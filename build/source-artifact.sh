@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fedora=registry.fedoraproject.org/fedora:44@sha256:1ff9eb02e4e2d7fb1175becac7139b2960c4fdcccedce81c86ec25b98ef3124d
+koji=https://kojipkgs.fedoraproject.org/packages
+key=6d9f90a6
+repo=https://github.com/seilent/MicroOS
+
+fail() { echo "source-artifact: $*" >&2; exit 1; }
+
+(( $# == 4 )) || { echo "usage: source-artifact.sh <srpms.tsv> <outdir> <full|base> <pkgdir>" >&2; exit 2; }
+tsv=$1
+out=$2
+mode=$3
+pkgs=$4
+[[ $mode == full || $mode == base ]] || fail "mode is $mode, not full or base"
+[[ -s $tsv ]] || fail "$tsv is empty"
+[[ -d $pkgs ]] || fail "$pkgs is not a dir"
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+. "$root/packages/kernel/SOURCE.env"
+
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+[[ -z $(ls -A "$out") ]] || fail "$out is not empty"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+nevra='^([A-Za-z0-9][A-Za-z0-9._+~^-]*)-([A-Za-z0-9._+~^]+)-([A-Za-z0-9._+~^]+)\.src\.rpm$'
+: > "$tmp/own"
+while IFS=$'\t' read -r name srpm vendor; do
+  [[ $vendor == MicroOS ]] || continue
+  case $name in
+    microos-kernel|microos-steam-seed) ;;
+    *)
+      [[ $srpm =~ $nevra && $srpm != *..* ]] || fail "bad source rpm name $srpm for the MicroOS package $name"
+      found=("$pkgs"/*/"$srpm")
+      [[ ${#found[@]} == 1 && -f ${found[0]} ]] || fail "no source rpm $srpm in $pkgs for the MicroOS package $name"
+      pkg=${found[0]%/*}
+      ref=$(awk -v n="${pkg##*/}" '$1 == n { print $2 }' "$pkgs/refs" 2>/dev/null || true)
+      [[ $ref == *@sha256:* ]] || fail "no pkg image ref for ${pkg##*/} in $pkgs/refs"
+      printf '%s %s %s\n' "$srpm" "${found[0]}" "$ref" >> "$tmp/own"
+      ;;
+  esac
+done < "$tsv"
+
+sha=$(git -C "$root" rev-parse HEAD)
+short=${sha::7}
+git -C "$root" archive --format=tar.gz --prefix=microos/ -o "$out/microos-$short.tar.gz" HEAD
+printf '%s %s\n' "microos-$short.tar.gz" "$repo/tree/$sha" > "$tmp/origins"
+
+kernel=linux-$KERNEL_VERSION.tar.xz
+curl -fsSL --retry 5 --retry-all-errors -o "$out/$kernel" "$KERNEL_URL"
+[[ $(sha256sum < "$out/$kernel" | cut -d' ' -f1) == "$KERNEL_SHA256" ]] || fail "$kernel sha256 mismatch"
+printf '%s %s\n' "$kernel" "$KERNEL_URL" >> "$tmp/origins"
+
+if [[ $mode == full ]]; then
+  sort -u "$tmp/own" | while read -r f path url; do
+    cp "$path" "$out/$f"
+    printf '%s %s\n' "$f" "$url" >> "$tmp/origins"
+  done
+  awk -F'\t' '$3 != "MicroOS" && $2 != "(none)" { print $2 }' "$tsv" | sort -u > "$tmp/srpms"
+  [[ -s $tmp/srpms ]] || fail "no source rpms in $tsv"
+  get=()
+  while read -r f; do
+    [[ $f =~ $nevra && $f != *..* ]] || fail "bad source rpm name $f"
+    url=$koji/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/${BASH_REMATCH[3]}/data/signed/$key/src/$f
+    if [[ -n ${MICROOS_SOURCE_CACHE:-} && -s $MICROOS_SOURCE_CACHE/$f ]]; then
+      ln "$MICROOS_SOURCE_CACHE/$f" "$out/$f" 2> /dev/null || cp "$MICROOS_SOURCE_CACHE/$f" "$out/$f"
+    else
+      get+=(-o "$out/$f" "$url")
+    fi
+    printf '%s %s\n' "$f" "$url" >> "$tmp/origins"
+  done < "$tmp/srpms"
+  echo "source-artifact: $(( $(wc -l < "$tmp/srpms") - ${#get[@]} / 2 )) source rpms from the cache, $(( ${#get[@]} / 2 )) from koji"
+  if (( ${#get[@]} )); then
+    curl -fsSLg --retry 5 --retry-all-errors --parallel --parallel-max 8 "${get[@]}" || fail "source rpm download failed"
+  fi
+  while read -r f; do
+    [[ -s $out/$f ]] || fail "$f missing"
+  done < "$tmp/srpms"
+  podman run --rm -v "$out:/src:ro" "$fedora" sh -c 'cd /src && rpm -K -- *.src.rpm' > "$tmp/rpmk" \
+    || { grep -v ': digests signatures OK$' "$tmp/rpmk" >&2; fail "rpm -K failed"; }
+  [[ $(grep -c ': digests signatures OK$' "$tmp/rpmk") == "$(wc -l < "$tmp/srpms")" ]] || fail "rpm -K did not pass every source rpm"
+fi
+
+sort "$tmp/origins" | while read -r f url; do
+  printf '%s %s %s\n' "$f" "$(sha256sum < "$out/$f" | cut -d' ' -f1)" "$url"
+done > "$tmp/SOURCES"
+[[ $(find "$out" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort) == "$(cut -d' ' -f1 "$tmp/SOURCES")" ]] || fail "files in $out differ from SOURCES"
+mv "$tmp/SOURCES" "$out/SOURCES"
+
+echo "source-artifact: $mode, $(wc -l < "$out/SOURCES") files, $(du -sb "$out" | cut -f1) bytes"

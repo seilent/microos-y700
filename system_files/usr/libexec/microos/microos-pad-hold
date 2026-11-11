@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+. "${MICROOS_SESSION_BIN:-/usr/bin/microos-session}"
+me=microos-pad-hold
+poll=0.25
+
+yield=""
+held=0
+while :; do
+  if [[ ${1:-} == --yield && ${2:-} =~ $namere ]]; then
+    yield=$2
+    shift 2
+  elif [[ ${1:-} == --held ]]; then
+    held=1
+    shift
+  else
+    break
+  fi
+done
+node=""
+if [[ ${1:-} =~ ^BTN_(START|SELECT|SOUTH)(\+BTN_(START|SELECT|SOUTH))*$ ]]; then
+  node=pad_node dev=$pad lock=$rundir/hold/.lock
+elif [[ ${1:-} == KEY_PROG4 ]]; then
+  node=key_node dev=$keys lock=$rundir/hold/.lock-keys
+fi
+[[ $# == 3 && -n $node && $2 =~ ^[1-9][0-9]*$ && $3 =~ ^(0|[1-9][0-9]*)$ ]] ||
+  { echo "usage: $me [--yield <session>] [--held] <BTN_x[+BTN_y]|KEY_PROG4> <hold s> <wait s>" >&2; exit 2; }
+IFS=+ read -r -a want <<< "$1"
+need=$(( $2 * 4 + 1 ))
+polls=$(( $3 * 4 ))
+released=$held
+(( $3 )) || { released=1; polls=$need; }
+
+if [[ ! -f $lock || -L $lock || $(stat -c %u:%a "$lock" 2> /dev/null) != 0:600 ]] || ! exec 6>> "$lock"; then
+  log "refused: lock file $lock missing or not root 0600"
+  exit 1
+fi
+if ! flock -n 6; then
+  log "refused: another hold is waiting"
+  exit 3
+fi
+mapfile -t nodes < <("$node")
+if (( ! ${#nodes[@]} )); then
+  log "refused: no $dev"
+  exit 1
+fi
+exec 5< <(pad_poll "$poll" "${nodes[@]}" 6>&-)
+p=$!
+trap 'kill "$p" 2> /dev/null' EXIT
+n=0
+for (( i = 0; i < polls; i++ )); do
+  if [[ -n $yield ]]; then
+    cur=""
+    read -r cur _ < "$rundir/session-current" 2> /dev/null || cur=""
+    if [[ $cur == "$yield" ]]; then
+      log "refused: the $yield session is active"
+      exit 1
+    fi
+  fi
+  k=""
+  if ! read -r -t 2 k <&5; then
+    log "refused: no key state from $dev"
+    exit 1
+  fi
+  (( i || ! held )) || log "first sample at $(mono) monotonic"
+  all=1
+  for b in "${want[@]}"; do
+    [[ " $k " == *" $b "* ]] || all=0
+  done
+  if (( ! all )); then
+    released=1
+    n=0
+    (( $3 )) || break
+    continue
+  fi
+  (( released )) || continue
+  n=$(( n + 1 ))
+  (( n < need )) || exit 0
+done
+log "refused: $1 not held for $2 s"
+exit 1

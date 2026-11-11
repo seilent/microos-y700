@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+meta() {
+  printf "update: id:0 key:'default.configured.audio.sink' value:'{ \"name\": \"%s\" }' type:'Spa:String:JSON'\n" "$1" >> "$STUB_DIR/meta.feed"
+}
+case "$*" in
+  "--format=json list sinks")
+    echo list >> "$STUB_DIR/lists"
+    if [[ -e $STUB_DIR/list-fails ]]; then
+      rm "$STUB_DIR/list-fails"
+      echo "pactl stub: list fails once" >&2
+      exit 1
+    fi
+    json=$(cat "$STUB_DIR/sinks.json")
+    for f in "$STUB_DIR"/susp/*; do
+      [[ -e $f ]] && json=${json//\"name\":\"${f##*/}\",\"state\":\"IDLE\"/\"name\":\"${f##*/}\",\"state\":\"SUSPENDED\"}
+    done
+    echo "$json"
+    if [[ -e $STUB_DIR/sinks.after ]]; then mv "$STUB_DIR/sinks.after" "$STUB_DIR/sinks.json"; fi
+    ;;
+  "--format=json list sink-inputs")
+    cat "$STUB_DIR/sink-inputs.json" 2> /dev/null || echo '[]'
+    ;;
+  "--format=json list source-outputs")
+    cat "$STUB_DIR/source-outputs.json" 2> /dev/null || echo '[]'
+    ;;
+  "--format=json list sources")
+    cat "$STUB_DIR/sources.json" 2> /dev/null || echo '[]'
+    ;;
+  "--format=json list cards")
+    printf '[{"name":"alsa_card.platform-sound","active_profile":"%s"}%s]\n' "$(cat "$STUB_DIR/profile")" "$(cat "$STUB_DIR/cards.json" 2> /dev/null)"
+    ;;
+  subscribe)
+    echo $$ > "$STUB_DIR/subscribe.pid"
+    exec tail -n 0 -F "$STUB_DIR/pactl.feed" 2> /dev/null
+    ;;
+  get-default-sink) cat "$STUB_DIR/default-sink" 2> /dev/null || echo auto_null ;;
+  "set-default-sink $2")
+    echo "default $2" >> "$STUB_DIR/log"
+    [[ -e $STUB_DIR/no-echo ]] || meta "$2"
+    ;;
+  "suspend-sink $2 1")
+    echo "suspend $2 $(date +%s%N)" >> "$STUB_DIR/log"
+    mkdir -p "$STUB_DIR/susp"
+    : > "$STUB_DIR/susp/$2"
+    gen=$RANDOM
+    echo "$gen" > "$STUB_DIR/dapm.gen"
+    echo on > "$STUB_DIR/dapm"
+    (sleep "$(awk -v ms="$DAPM_MS" 'BEGIN { print ms / 1000 }')"
+      [[ $(cat "$STUB_DIR/dapm.gen") == "$gen" ]] && echo off > "$STUB_DIR/dapm") > /dev/null 2>&1 &
+    echo "Event 'change' on sink #1" >> "$STUB_DIR/pactl.feed"
+    ;;
+  "suspend-sink $2 0") echo "resume $2" >> "$STUB_DIR/log" ;;
+  "set-sink-volume "*)
+    if [[ $2 == microos-eq.* && -e $STUB_DIR/chainvol-fails ]]; then
+      rm "$STUB_DIR/chainvol-fails"
+      echo "pactl stub: chain volume fails once" >&2
+      exit 1
+    fi
+    echo "volume ${*:2}" >> "$STUB_DIR/log"
+    ;;
+  "set-sink-mute $2 $3") echo "mute $2 $3" >> "$STUB_DIR/log" ;;
+  "set-card-profile $2 $3")
+    if [[ -e $STUB_DIR/profile-fails-always ]]; then
+      echo try >> "$STUB_DIR/profile-tries"
+      echo "pactl stub: profile fails" >&2
+      exit 1
+    fi
+    if [[ -e $STUB_DIR/profile-fails ]]; then
+      rm "$STUB_DIR/profile-fails"
+      echo "pactl stub: profile fails once" >&2
+      exit 1
+    fi
+    echo "profile $2 $3" >> "$STUB_DIR/log"
+    ;;
+  *)
+    echo "pactl stub: $*" >&2
+    exit 1
+    ;;
+esac
