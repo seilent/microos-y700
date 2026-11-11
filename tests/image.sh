@@ -110,6 +110,7 @@ kept=(
   /usr/lib/sddm/sddm.conf.d/zz-microos.conf
   /usr/lib/sysctl.d/60-microos-yama.conf
   /usr/lib/systemd/journald.conf.d/10-microos.conf
+  /usr/lib/systemd/logind.conf.d/50-microos.conf
   /usr/lib/systemd/system-preset/50-microos.preset
   /usr/lib/systemd/system-preset/60-microos-steam.preset
   /usr/lib/systemd/system/emergency.service.d/10-microos.conf
@@ -212,12 +213,64 @@ grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail
 for f in microos-slot microos-usb-console microos-vpad; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
+vpad=/usr/libexec/microos/microos-vpad
 python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
-  /usr/libexec/microos/microos-vpad "$tmp/vpad.pyc" || fail "microos-vpad does not compile"
-ioc() { echo $(( ($1 << 30) | ($3 << 16) | (0x55 << 8) | $2 )); }
-[[ $(MICROOS_VPAD_DRYRUN=1 /usr/libexec/microos/microos-vpad) == "1116 $(ioc 1 100 4) $(ioc 1 101 4) $(ioc 1 103 4) $(ioc 0 1 0)" ]] \
-  || fail "microos-vpad record or ioctl numbers"
-grep -qx 'DeviceAllow=/dev/uinput rw' /usr/lib/systemd/system/microos-vpad.service || fail "microos-vpad.service DeviceAllow"
+  "$vpad" "$tmp/vpad.pyc" || fail "microos-vpad does not compile"
+[[ $(grep -E '^\s*(import|from) ' "$vpad" | LC_ALL=C sort | paste -sd' ') == \
+  'import fcntl import math import os import select import signal import struct import sys import time' ]] || fail "microos-vpad imports"
+! grep -q ctypes "$vpad" || fail "microos-vpad uses ctypes"
+vp() { MICROOS_VPAD_DRYRUN=$1 "$vpad" "${@:2}"; }
+evioc() { echo $(( ($1 << 30) | ($3 << 16) | (0x45 << 8) | $2 )); }
+desc=06ffff0901a10109020903150026ff00750895408102090609071500
+desc+=26ff0075089540b102c0
+[[ $(vp 1) == "$((4 + 128 + 64 + 64 + 2 + 2 + 4 * 4 + 4096)) $(evioc 1 0x80 48) $(evioc 1 0x90 4) $(evioc 2 0x18 96) 48 24 $desc" ]] \
+  || fail "microos-vpad event sizes, ioctl numbers or descriptor: $(vp 1)"
+c=$(vp uhid create)
+[[ ${c:0:8} == 0b000000 && ${c:520:4} == 2600 && ${c:524:4} == 0300 && ${c:528:8} == de280000 && ${c:536:8} == 05120000 \
+  && ${c:560} == "$desc" ]] || fail "microos-vpad CREATE2 event: $c"
+serial=4d4943524f4f5359373030
+[[ $(vp uhid 0d000000070000000000040000ae1501 09000000080000000000) == \
+  "$(printf '0e000000070000000000%0140d' 0)"$'\n'"$(printf '0a000000080000000000410000ae0c01%s00%0104d' "$serial" 0)" ]] \
+  || fail "microos-vpad SET_REPORT and GET_REPORT replies: $(vp uhid 0d000000070000000000040000ae1501 09000000080000000000)"
+mapfile -t fr < <(vp feature ae1501 8300 8703080700)
+[[ ${fr[0]} == "$(printf '00ae0c01%s00%098d' "$serial" 0)" ]] || fail "microos-vpad serial reply: ${fr[0]}"
+recs=" "
+for ((i = 6; i < 6 + 2 * 16#${fr[1]:4:2}; i += 10)); do
+  recs+="${fr[1]:i:10} "
+done
+[[ ${fr[1]:0:4} == 0083 && $recs == *' 0105120000 '* && $recs == *' 0ba00f0000 '* ]] || fail "microos-vpad attributes reply: ${fr[1]}"
+[[ ${fr[2]} == "$(printf '008703080700%0118d' 0)" ]] || fail "microos-vpad settings echo: ${fr[2]}"
+[[ $(vp haptic 8f0801a00f0000010000) == 'left 8 40960' && $(vp haptic 8f0801a00f0000000000) == 'left 8 40960' \
+  && $(vp haptic 8f0800a00f0000010000) == 'right 8 40960' && $(vp haptic 8f0802a00f0000010000) == $'left 8 40960\nright 8 40960' \
+  && $(vp haptic 8f0801a00f00000100fa) == 'left 8 20529' && $(vp haptic 8f0801a00fa00f050000) == 'left 40 40960' \
+  && $(vp haptic 8f0801a00fa00f640000) == 'left 200 40960' ]] || fail "microos-vpad 0x8f pulses"
+[[ $(vp haptic ea0402010000) == $'left 12 40960\nright 12 40960' && $(vp haptic ea0402010400) == $'left 24 40960\nright 24 40960' \
+  && $(vp haptic ea0402020100) == $'left 13 40960\nright 13 40960' && $(vp haptic ea0400000000) == 'left 0 0' \
+  && -z $(vp haptic eb09000000000000000000 ec0a0000000000000000) ]] || fail "microos-vpad 0xea, 0xeb or 0xec"
+[[ $(vp keys '0:1 80:0') == 'single 380' && $(vp keys '0:1 80:0 200:1 260:0') == 'double 200' && -z $(vp keys '0:1 700:0') ]] \
+  || fail "microos-vpad power key taps"
+off=$'save 1200\nbl 0'
+for t in "single|$off"$'\ngrab' "single bl=800 single|$off"$'\ngrab\nbl 0\nbl 1200\nungrab' \
+  "single double|$off"$'\ngrab\nbl 1200\nungrab' 'double|qam' "touch=1 single|$off" "touch=1 single touch=0|$off"$'\ngrab' \
+  "touch=1 single wait=1999 touch=0|$off"$'\ngrab' "touch=1 single wait=2000|$off"$'\nnograb' "ebusy single|$off"$'\nnograb'; do
+  [[ $(vp screen 1200 "${t%%|*}") == "${t#*|}" ]] || fail "microos-vpad screen ${t%%|*}: $(vp screen 1200 "${t%%|*}" | tr '\n' ' ')"
+done
+[[ $(vp screen 0 'single single') == $'save 0\nbl 0\ngrab\nbl 512\nungrab' ]] || fail "microos-vpad screen restore of 0"
+[[ $(vp restore 0 1200) == 1200 && $(vp restore 0 none) == 512 && $(vp restore 0 0) == 512 && -z $(vp restore 900 1200) ]] \
+  || fail "microos-vpad restore values"
+unit=/usr/lib/systemd/system/microos-vpad.service
+for l in 'DeviceAllow=/dev/uhid rw' 'DeviceAllow=char-input rw' 'ReadWritePaths=-/sys/class/backlight/ktz8866-backlight/' \
+  'StartLimitIntervalSec=0' 'RuntimeDirectory=microos-vpad' 'RuntimeDirectoryPreserve=yes' \
+  'ExecStopPost=/usr/libexec/microos/microos-vpad restore' 'MemoryDenyWriteExecute=yes' 'CapabilityBoundingSet=' \
+  'RestrictAddressFamilies=none'; do
+  grep -qxF "$l" "$unit" || fail "microos-vpad.service lacks $l"
+done
+! grep -q uinput "$unit" || fail "microos-vpad.service still allows uinput"
+[[ $(< /usr/lib/systemd/logind.conf.d/50-microos.conf) == $'[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=ignore' ]] \
+  || fail "logind 50-microos.conf"
+grep -qxF 'SUBSYSTEM=="hidraw", KERNELS=="000[356]:28DE:*", MODE="0660", TAG+="uaccess"' /usr/lib/udev/rules.d/60-steam-input.rules \
+  || fail "60-steam-input.rules has no hidraw rule for 28DE"
+compgen -G "/usr/lib/modules/$kver/kernel/drivers/hid/hid-steam.ko*" >/dev/null || fail "hid-steam module missing"
 [[ $(< /usr/lib/udev/rules.d/90-microos-usb-console.rules) == \
   'SUBSYSTEM=="tty", KERNEL=="ttyGS0", ENV{SYSTEMD_WANTS}+="serial-getty@ttyGS0.service"' ]] || fail "90-microos-usb-console.rules"
 [[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -\nd /var/cache/libX11 0755 root root -\nd /var/cache/libX11/compose 0755 root root -' ]] \
