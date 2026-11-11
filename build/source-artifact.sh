@@ -49,10 +49,20 @@ short=${sha::7}
 git -C "$root" archive --format=tar.gz --prefix=microos/ -o "$out/microos-$short.tar.gz" HEAD
 printf '%s %s\n' "microos-$short.tar.gz" "$repo/tree/$sha" > "$tmp/origins"
 
-kernel=linux-$KERNEL_VERSION.tar.xz
-curl -fsSL --retry 5 --retry-all-errors -o "$out/$kernel" "$KERNEL_URL"
-[[ $(sha256sum < "$out/$kernel" | cut -d' ' -f1) == "$KERNEL_SHA256" ]] || fail "$kernel sha256 mismatch"
-printf '%s %s\n' "$kernel" "$KERNEL_URL" >> "$tmp/origins"
+if [[ -n ${KERNEL_URL:-} ]]; then
+  kernel=${KERNEL_URL##*/}
+  curl -fsSL --retry 5 --retry-all-errors -o "$out/$kernel" "$KERNEL_URL"
+  [[ $(sha256sum < "$out/$kernel" | cut -d' ' -f1) == "$KERNEL_SHA256" ]] || fail "$kernel sha256 mismatch"
+  printf '%s %s\n' "$kernel" "$KERNEL_URL" >> "$tmp/origins"
+else
+  kernel=linux-${KERNEL_TAG#v}.tar.gz
+  git init -q "$tmp/linux"
+  git -C "$tmp/linux" fetch -q --depth 1 "$KERNEL_GIT" "refs/tags/$KERNEL_TAG" || fail "fetch of $KERNEL_TAG failed"
+  [[ $(git -C "$tmp/linux" rev-parse 'FETCH_HEAD^{commit}') == "$KERNEL_COMMIT" ]] || fail "$KERNEL_TAG is not $KERNEL_COMMIT"
+  git -C "$tmp/linux" archive --format=tar.gz --prefix="linux-${KERNEL_TAG#v}/" -o "$out/$kernel" "$KERNEL_COMMIT"
+  rm -rf "${tmp:?}/linux"
+  printf '%s %s\n' "$kernel" "$KERNEL_GIT/tag/?h=$KERNEL_TAG" >> "$tmp/origins"
+fi
 
 if [[ $mode == full ]]; then
   sort -u "$tmp/own" | while read -r f path url; do

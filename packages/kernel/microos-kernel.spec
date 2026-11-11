@@ -16,10 +16,10 @@ Provides:       kernel = %{version}-%{release}
 Provides:       kernel-core = %{version}-%{release}
 Provides:       kernel-modules = %{version}-%{release}
 Provides:       kernel-modules-core = %{version}-%{release}
-Provides:       kernel-uname-r = %{kver}
-Provides:       kernel-core-uname-r = %{kver}
-Provides:       kernel-modules-uname-r = %{kver}
-Provides:       kernel-modules-core-uname-r = %{kver}
+Provides:       kernel-uname-r = %{kuname}
+Provides:       kernel-core-uname-r = %{kuname}
+Provides:       kernel-modules-uname-r = %{kuname}
+Provides:       kernel-modules-core-uname-r = %{kuname}
 
 %description
 Linux %{kver}: raw arm64 Image as vmlinuz, modules and the Legion Y700 Gen 3

@@ -458,7 +458,8 @@ jobs:
         run: |
           cosign verify --key "$PUBKEY" "$IMAGE@$ART" > /dev/null
           . packages/kernel/SOURCE.env
-          names=$(printf '%s\n' "microos-$SHORT.tar.gz" "linux-$KERNEL_VERSION.tar.xz")
+          if [[ -n ${KERNEL_URL:-} ]]; then kernel=${KERNEL_URL##*/}; else kernel=linux-${KERNEL_TAG#v}.tar.gz; fi
+          names=$(printf '%s\n' "microos-$SHORT.tar.gz" "$kernel")
           if [[ $MODE == full ]]; then
             names+=$'\n'$(awk -F'\t' '$2 != "(none)" && ($3 != "MicroOS" || $1 != "microos-kernel") { print $2 }' \
               "$RUNNER_TEMP/srpms/srpms.tsv" | sort -u)
