@@ -119,6 +119,36 @@
 		regulator-boot-on;
 	};
 
+	sound {
+		compatible = "lenovo,tb321fu-sndcard";
+		model = "Lenovo-Y700-TB321FU";
+
+		pinctrl-0 = <&sec_tdm_default>;
+		pinctrl-names = "default";
+
+		speaker-tdm-dai-link {
+			link-name = "Speaker Playback";
+
+			cpu {
+				sound-dai = <&q6apmbedai SECONDARY_TDM_RX_0>;
+
+				dai-tdm-slot-num = <8>;
+				dai-tdm-slot-width = <32>;
+				dai-tdm-slot-rx-mask = <1 1 0 0 0 0 0 0>;
+			};
+
+			codec {
+				sound-dai = <&speaker_left>, <&speaker_right>;
+
+				dai-tdm-slot-rx-mask = <1 1 0 0 0 0 0 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+	};
+
 	wcn7850-pmu {
 		compatible = "qcom,wcn7850-pmu";
 
@@ -509,6 +539,40 @@
 	};
 };
 
+&i2c8 {
+	status = "okay";
+
+	speaker_left: audio-codec@34 {
+		compatible = "awinic,aw88461";
+		reg = <0x34>;
+		#sound-dai-cells = <0>;
+
+		reset-gpios = <&tlmm 120 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&spkr_left_reset_default>;
+		pinctrl-names = "default";
+
+		firmware-name = "qcom/sm8650/lenovo/tb321fu/aw882xx_acf.bin";
+		awinic,audio-channel = <0>;
+		sound-name-prefix = "SpkrLeft";
+	};
+
+	speaker_right: audio-codec@37 {
+		compatible = "awinic,aw88461";
+		reg = <0x37>;
+		#sound-dai-cells = <0>;
+
+		reset-gpios = <&tlmm 128 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&spkr_right_reset_default>;
+		pinctrl-names = "default";
+
+		firmware-name = "qcom/sm8650/lenovo/tb321fu/aw882xx_acf.bin";
+		awinic,audio-channel = <1>;
+		sound-name-prefix = "SpkrRight";
+	};
+};
+
 &i2c10 {
 	status = "okay";
 
@@ -718,6 +782,18 @@
 	status = "okay";
 };
 
+&q6apmbedai {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	dai@28 {
+		reg = <SECONDARY_TDM_RX_0>;
+		clocks = <&q6prmcc LPASS_CLK_ID_SEC_TDM_IBIT
+				   LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "bclk";
+	};
+};
+
 &qupv3_id_0 {
 	status = "okay";
 };
@@ -811,6 +887,50 @@
 		pins = "gpio133";
 		function = "gpio";
 		drive-strength = <8>;
+		bias-disable;
+	};
+
+	sec_tdm_default: sec-tdm-default-state {
+		sck-pins {
+			pins = "gpio121";
+			function = "i2s1_sck";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		data0-pins {
+			pins = "gpio122";
+			function = "i2s1_data0";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		ws-pins {
+			pins = "gpio123";
+			function = "i2s1_ws";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		data1-pins {
+			pins = "gpio124";
+			function = "i2s1_data1";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+
+	spkr_left_reset_default: spkr-left-reset-default-state {
+		pins = "gpio120";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	spkr_right_reset_default: spkr-right-reset-default-state {
+		pins = "gpio128";
+		function = "gpio";
+		drive-strength = <2>;
 		bias-disable;
 	};
 
