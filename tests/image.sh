@@ -95,7 +95,6 @@ kept=(
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/modprobe.d/microos-y700-rtc.conf
-  /usr/lib/udev/rules.d/59-microos-y700-input.rules
   /usr/lib/udev/rules.d/60-microos-backlight.rules
   /usr/lib/systemd/user-preset/60-microos-audio.preset
   /usr/share/pipewire/pipewire.conf.d/90-microos-null-sink.conf
@@ -193,7 +192,8 @@ extra=$(LC_ALL=C comm -23 <(printf '%s\n' "${ours[@]}") <(printf '%s\n' "${kept[
 [[ -z $extra ]] || fail "MicroOS files outside the M2 set: $(tr '\n' ' ' <<< "$extra")"
 for f in /usr/bin/steamvr /usr/lib/hwsupport /usr/lib/android-sdk /usr/share/inputplumber /usr/share/steamos-manager \
   /usr/share/gamescope-session-plus/sessions.d/recovery /usr/libexec/microos/microos-steam-compat \
-  /usr/libexec/microos/microos-session-watch /usr/bin/microos-session /usr/share/plymouth/themes/microos; do
+  /usr/libexec/microos/microos-session-watch /usr/bin/microos-session /usr/share/plymouth/themes/microos \
+  /usr/lib/udev/rules.d/59-microos-y700-input.rules; do
   [[ ! -e $f ]] || fail "$f is in the image"
 done
 ucm=$(compgen -G '/usr/share/alsa/ucm2/*/sm8250/PocketMICRO2*' || true)
@@ -353,10 +353,6 @@ ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turn
 [[ $(< /usr/lib/modules-load.d/microos-y700.conf) == pci-pwrctrl-pwrseq ]] || fail "modules-load.d microos-y700.conf"
 [[ $(< /usr/lib/modprobe.d/microos-y700-rtc.conf) == 'blacklist rtc_pm8xxx' ]] || fail "modprobe.d microos-y700-rtc.conf"
 [[ $(readlink /etc/systemd/system-generators/systemd-gpt-auto-generator) == /dev/null ]] || fail "systemd-gpt-auto-generator is not masked"
-rules=/usr/lib/udev/rules.d/59-microos-y700-input.rules
-grep -qxF 'ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"' "$rules" || fail "touch calibration rule"
-grep -qF 'ATTRS{name}=="NVTCapacitivePen", ENV{.HAVE_HWDB_PROPERTIES}="1", ENV{EVDEV_ABS_00}="::135", ENV{EVDEV_ABS_01}="::135"' "$rules" || fail "pen resolution rule"
-udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
 udevadm verify --no-style /usr/lib/udev/rules.d/60-microos-backlight.rules >/dev/null 2>&1 || fail "60-microos-backlight.rules does not verify"
 rules=/usr/lib/udev/rules.d/91-microos-y700-bdaddr.rules
 [[ $(< "$rules") == 'SUBSYSTEM=="bluetooth", KERNEL=="hci[0-9]*", ENV{DEVTYPE}=="host", TAG+="systemd", ENV{SYSTEMD_WANTS}+="microos-bdaddr@%k.service"' ]] \
@@ -368,11 +364,13 @@ pw=/usr/bin/steamos-polkit-helpers/steamos-priv-write
 ! "$pw" /etc/passwd 1 2>/dev/null || fail "$pw writes outside backlight brightness"
 ! "$pw" /sys/class/backlight/none/brightness 1 2>/dev/null || fail "$pw accepts a missing backlight"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
-  drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/power/supply/qcom_battmgr; do
+  drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/power/supply/qcom_battmgr \
+  drivers/input/touchscreen/novatek-nt36523; do
   compgen -G "/usr/lib/modules/$kver/kernel/$m.ko*" >/dev/null || fail "module $m missing"
 done
 alias=/usr/lib/modules/$kver/modules.alias
 grep -qx 'alias of:N\*T\*Cpci17cb,1107 pci_pwrctrl_pwrseq' "$alias" || fail "no WCN7850 alias for pci_pwrctrl_pwrseq"
+grep -qx 'alias of:N\*T\*Cnovatek,nt36523-ts novatek_nt36523' "$alias" || fail "no NT36523 touchscreen alias for novatek_nt36523"
 for f in amss m3 board-2; do
   compgen -G "/usr/lib/firmware/ath12k/WCN7850/hw2.0/$f.bin*" >/dev/null || fail "ath12k WCN7850 $f.bin missing"
 done
