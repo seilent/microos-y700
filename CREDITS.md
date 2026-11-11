@@ -9,10 +9,9 @@ origins in `packages/kernel/PATCHES.md`.
 
 | What | Origin | Author | License |
 |---|---|---|---|
-| Qualcomm SPMI haptics driver | patchwork `20210816221931.1998187-3-caleb@connolly.tech`, Retroid kernel `51ef2f2ed1da` | Casey Connolly, Teguh Sobirin | GPL-2.0-only |
-| Qualcomm SMB5 charger and PM8150B fuel gauge | [map220v/sm8150-mainline](https://github.com/map220v/sm8150-mainline) `27f8b500c7a6`, `50cf85d48047`; Retroid kernel `71fae666971c`; ROCKNIX `0393a000d2`, `1dc63e1531`, `7b4da83200` | The Linux Foundation (Qualcomm downstream fuel gauge), Teguh Sobirin, Casey Connolly, Joel Selvaraj, Yassine Oudjana, map220v, Nefirim, Xenocideend, sunshineinabox | GPL-2.0-only |
-| PM8150B charger, fuel gauge and haptics nodes | map220v/sm8150-mainline `462e45bc434a`; Retroid kernel `23f7c4590989`, `876b57545d04` | Teguh Sobirin, map220v | BSD-3-Clause |
-| PM8150L LCDB regulator and node | [ROCKNIX](https://github.com/ROCKNIX/distribution) `063e530e58`, ported from Qualcomm downstream `qpnp-lcdb-regulator` | Philippe Simons, The Linux Foundation (Qualcomm downstream) | GPL-2.0-only, BSD-3-Clause |
+| TB321FU DTS and patch set | [enij90/armada-tb321fu](https://github.com/enij90/armada-tb321fu) `v20261024.0146e89`, per patch sources in its `PATCHES.md` | enij90, patch authors as listed there | BSD-3-Clause (DTS), GPL-2.0-only |
+| Qualcomm HV haptics driver | [ROCKNIX](https://github.com/ROCKNIX/distribution) `47e077d0bb` (SM8750), Qualcomm downstream `qcom-hv-haptics` | The Linux Foundation, Qualcomm Innovation Center (Qualcomm downstream) | GPL-2.0-only |
+| PM8150L LCDB regulator | ROCKNIX `063e530e58`, ported from Qualcomm downstream `qpnp-lcdb-regulator` | Philippe Simons, The Linux Foundation (Qualcomm downstream) | GPL-2.0-only |
 | wcd938x headphone jack detection | [batocera.linux](https://github.com/batocera-linux/batocera.linux) `ea7bbd5c7f84` | Daniel Martin | GPL-2.0 |
 | HDMI audio `hw_params` callback | lore `20250925040530.20731-1-liujianfeng1994@gmail.com` | Jianfeng Liu | MIT |
 | sm8250 backend format kept for PCM | [ROCKNIX/distribution-old](https://github.com/ROCKNIX/distribution-old) `f7b53cc4b244` (idea), Linux `89be3c15a58b` (S16_LE force) | rmake, Alexey Klimov | GPL-2.0 |
@@ -20,17 +19,10 @@ origins in `packages/kernel/PATCHES.md`.
 | ufs-qcom lane clocks | `mkp/scsi.git` `f07317a8d57f` | Nitin Rawat | GPL-2.0-only |
 | qcom-geni force suspend in system sleep | Linux `d0cd9c8d0fd5` | Praveen Talari | GPL-2.0 |
 | qce runtime PM and interconnect scaling | Linux `6f5569203bb6` | Udit Tiwari | GPL-2.0-only |
-| D3 for native hotplug Root Ports on non-x86 | Linux `d4c79b63d82d` | Manivannan Sadhasivam | GPL-2.0 |
-| qrtr HELLO on endpoint register | Linux `544d85de4dc2` | Chris Lew | GPL-2.0-only |
-| qrtr resend HELLO on MHI resume | Linux `6a5719cc3ef2` | Daniel J Blueman | GPL-2.0-only |
-| qrtr HELLO gate for control packets | lore `20261019-upstream-qrtr-hello-gate-fix_b4-v1` | Igor Opaniuk | GPL-2.0-only |
 | lpass rx and tx macro PM clocks for runtime PM, clk_set_rate() check, wsa macro MCLK output with devm | Linux `b9b23e72abef`, `b05482e7ce1b`, `b8ca90fafe6a`, `541735571578` | Ajay Kumar Nandam, Ravi Hothi | GPL-2.0-only |
 | AR16 panel driver, base of the AR18 driver | ROCKNIX SM8550 `0064`, `aa418ad72e` | danyi | GPL-2.0-only |
 | Sitronix ST7123 driver, base of the ST7123 driver | [raspberrypi/linux](https://github.com/raspberrypi/linux) `6d4adb6bfea6` | Waveshare, Sitronix | GPL-2.0 |
 | Rumble report format in `hid-ayaneo` | stock Android 4.19.157 `hid-ayaneo` | AYANEO | GPL-2.0 |
-| PM2 DTS layout shared with other SM8250 boards | Linux `qrb5165-rb5.dts`; `sm8250-retroidpocket-common.dtsi`; `sm8250-ayn-thorlite.dts`; SBU mux routing in Armada `9741312` | Linaro; Teguh Sobirin (Retroid Pocket); Philippe Simons; Tom | BSD-3-Clause |
-
-Retroid kernel is [lineageos-on-retroid/android_kernel_retroid_sm8250_ack](https://github.com/lineageos-on-retroid/android_kernel_retroid_sm8250_ack).
 
 ## Base
 
