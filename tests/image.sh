@@ -201,6 +201,8 @@ grep -qxF '	File "/Qualcomm/sm8650/TB321FU/HiFi.conf"' /usr/share/alsa/ucm2/conf
   || fail "TB321FU UCM card file"
 grep -qF "cset \"name='SEC_TDM_RX_0 Audio Mixer MultiMedia2' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
   || fail "TB321FU UCM speaker route"
+grep -qF "cset \"name='SpkrRight Playback Switch' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
+  || fail "TB321FU UCM speaker amplifier controls"
 [[ $(rpm -qf /usr/lib/firmware/qcom/sm8650/Lenovo-Y700-TB321FU-tplg.bin 2>/dev/null) == audioreach-topology-* ]] \
   || fail "TB321FU topology is not from audioreach-topology"
 [[ -z $ucm ]] || fail "PM2 UCM files in the image: $ucm"
@@ -365,17 +367,19 @@ pw=/usr/bin/steamos-polkit-helpers/steamos-priv-write
 ! "$pw" /sys/class/backlight/none/brightness 1 2>/dev/null || fail "$pw accepts a missing backlight"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
   drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/power/supply/qcom_battmgr \
-  drivers/input/touchscreen/novatek-nt36523; do
+  drivers/input/touchscreen/novatek-nt36523 sound/soc/codecs/snd-soc-aw88261 sound/soc/qcom/snd-soc-sc8280xp; do
   compgen -G "/usr/lib/modules/$kver/kernel/$m.ko*" >/dev/null || fail "module $m missing"
 done
 alias=/usr/lib/modules/$kver/modules.alias
 grep -qx 'alias of:N\*T\*Cpci17cb,1107 pci_pwrctrl_pwrseq' "$alias" || fail "no WCN7850 alias for pci_pwrctrl_pwrseq"
 grep -qx 'alias of:N\*T\*Cnovatek,nt36523-ts novatek_nt36523' "$alias" || fail "no NT36523 touchscreen alias for novatek_nt36523"
+grep -qx 'alias of:N\*T\*Cawinic,aw88461 snd_soc_aw88261' "$alias" || fail "no AW88461 alias for snd_soc_aw88261"
+grep -qx 'alias of:N\*T\*Clenovo,tb321fu-sndcard snd_soc_sc8280xp' "$alias" || fail "no TB321FU sound card alias for snd_soc_sc8280xp"
 for f in amss m3 board-2; do
   compgen -G "/usr/lib/firmware/ath12k/WCN7850/hw2.0/$f.bin*" >/dev/null || fail "ath12k WCN7850 $f.bin missing"
 done
 dtbs=$(tr -d '\0' < "$dtb")
-for f in gen70900_zap.mbn novatek_ts_boe_fw.bin vpu33_p4.mbn adsp.mdt cdsp.mdt; do
+for f in gen70900_zap.mbn novatek_ts_boe_fw.bin vpu33_p4.mbn adsp.mdt cdsp.mdt aw882xx_acf.bin; do
   [[ $dtbs == *"qcom/sm8650/lenovo/tb321fu/$f"* ]] || fail "MICROOS_DTB does not ask for qcom/sm8650/lenovo/tb321fu/$f"
 done
 for f in gen70900_sqe.fw gmu_gen70900.bin; do
