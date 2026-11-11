@@ -112,6 +112,8 @@ kept=(
   /usr/lib/microos/bootimg.conf
   /usr/lib/microos/slot.conf
   /usr/lib/microos/stub.conf
+  /usr/lib/microos/stub/stub-preset-free.bin
+  /usr/lib/microos/stub/stub-preset-free.conf
   /usr/lib/microos/version
   /usr/lib/modules-load.d/microos-y700.conf
   /usr/lib/sddm/sddm.conf.d/zz-microos.conf
@@ -157,6 +159,7 @@ kept=(
   /usr/libexec/microos/microos-sdam
   /usr/libexec/microos/microos-slot
   /usr/libexec/microos/microos-steam-seed
+  /usr/libexec/microos/microos-stub-pack
   /usr/libexec/microos/microos-test
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
@@ -216,6 +219,16 @@ kargs = [
   "cpuidle.off=1",
 ]' ]] || fail "10-microos.toml kargs"
 [[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=1\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not turn slot writes on"
+stub=/usr/lib/microos/stub
+[[ $(sha256sum < "$stub/stub-preset-free.conf") == $(sha256sum < /usr/lib/microos/stub.conf) ]] || fail "stub-preset-free.conf differs from stub.conf"
+payload=$(( $(sed -n 's/^MICROOS_STUB_PAYLOAD=//p' /usr/lib/microos/stub.conf) ))
+[[ $(stat -c %s "$stub/stub-preset-free.bin") == "$payload" ]] || fail "stub-preset-free.bin is not $payload bytes"
+[[ $(dd if="$stub/stub-preset-free.bin" bs=1 skip=56 count=4 status=none) == ARMd ]] || fail "stub-preset-free.bin has no arm64 Image header"
+{ head -c 16 /dev/zero; printf '\x00\x10\x00\x00\x00\x00\x00\x00'; head -c 32 /dev/zero; printf 'ARMd'; head -c 4036 /dev/zero; } > "$tmp/Image"
+/usr/libexec/microos/microos-stub-pack "$tmp/Image" "$tmp/packed" > /dev/null || fail "microos-stub-pack failed on a dummy Image"
+[[ $(stat -c %s "$tmp/packed") == $(( payload + 4096 )) ]] || fail "microos-stub-pack output size $(stat -c %s "$tmp/packed")"
+[[ $(od -An -tu8 -j16 -N8 "$tmp/packed" | tr -d ' ') == $(( payload + 4096 )) ]] || fail "microos-stub-pack image_size"
+[[ $(tail -c 4096 "$tmp/packed" | sha256sum) == $(sha256sum < "$tmp/Image") ]] || fail "microos-stub-pack payload bytes differ"
 [[ $(sha256sum < /usr/share/microos/avb/testkey_rsa4096.pem) == "6a224754880a57ab9cbd308267cd157d94cf05a1c8cb851aec4090e045d24121  -" ]] \
   || fail "AVB test key sha256"
 [[ $(< /usr/lib/systemd/journald.conf.d/10-microos.conf) == $'[Journal]\nStorage=persistent' ]] || fail "journald 10-microos.conf"
@@ -225,7 +238,7 @@ kargs = [
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad microos-remoteproc; do
+for f in microos-slot microos-usb-console microos-vpad microos-remoteproc microos-stub-pack; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad

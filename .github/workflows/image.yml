@@ -162,7 +162,13 @@ jobs:
           echo "$push_tag $final_tag"
 
       - name: Stub
-        run: tests/stub.sh
+        run: |
+          tests/stub.sh
+          d=system_files/usr/lib/microos/stub
+          mkdir -p "$d"
+          build/y700-stub/pack --preset-free --prefix "$d/stub-preset-free.bin"
+          cp system_files/usr/lib/microos/stub.conf "$d/stub-preset-free.conf"
+          sha256sum "$d"/*
 
       - name: Build
         id: build
