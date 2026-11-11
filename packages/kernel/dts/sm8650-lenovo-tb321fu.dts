@@ -78,6 +78,20 @@
 		};
 	};
 
+	vreg_panel_iovdd: regulator-panel-iovdd {
+		compatible = "regulator-fixed";
+
+		regulator-name = "panel_iovdd";
+		regulator-min-microvolt = <1950000>;
+		regulator-max-microvolt = <1950000>;
+
+		gpio = <&pm8550ve_gpios 8 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&vreg_l12b_1p95>;
+
+		regulator-boot-on;
+	};
+
 	vph_pwr: regulator-vph-pwr {
 		compatible = "regulator-fixed";
 
@@ -374,10 +388,6 @@
 	};
 };
 
-&dispcc {
-	status = "disabled";
-};
-
 &gpi_dma1 {
 	status = "okay";
 };
@@ -430,14 +440,15 @@
 		vddneg-supply = <&panel_bias_neg>;
 		enable-gpios = <&tlmm 87 GPIO_ACTIVE_HIGH>;
 
-		status = "disabled";
+		current-num-sinks = <4>;
+		kinetic,inductor-nanohenry = <4700>;
+		kinetic,ovp-microvolt = <34000000>;
+		led-max-microamp = <15600>;
 	};
 
 	regulator@3e {
 		compatible = "awinic,aw37503";
 		reg = <0x3e>;
-
-		status = "disabled";
 
 		panel_bias_pos: outp {
 			regulator-name = "panel_bias_pos";
@@ -461,6 +472,10 @@
 	status = "okay";
 };
 
+&mdss {
+	status = "okay";
+};
+
 &mdss_dsi0 {
 	vdda-supply = <&vreg_l3i_1p2>;
 	qcom,dual-dsi-mode;
@@ -473,9 +488,14 @@
 		compatible = "lenovo,tb321fu-boe-nt36523", "novatek,nt36523";
 		reg = <0>;
 
-		vddio-supply = <&vreg_l12b_1p95>;
+		vddio-supply = <&vreg_panel_iovdd>;
+		vci-supply = <&vreg_l13b_3p0>;
+		vdd-supply = <&vreg_l11b_1p2>;
 		reset-gpios = <&tlmm 133 GPIO_ACTIVE_LOW>;
 		backlight = <&backlight>;
+
+		pinctrl-0 = <&disp0_reset_n_active>;
+		pinctrl-names = "default";
 
 		ports {
 			#address-cells = <1>;
@@ -693,6 +713,13 @@
 			function = "gpio";
 			bias-pull-down;
 		};
+	};
+
+	disp0_reset_n_active: disp0-reset-n-active-state {
+		pins = "gpio133";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
 	};
 
 	wlan_en: wlan-en-state {
