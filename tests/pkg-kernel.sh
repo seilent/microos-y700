@@ -54,6 +54,8 @@ abl=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-abl.dtb
 [[ $(fdtget -t x "$abl" / qcom,board-id) == "0 0" ]] || { echo "pkg-kernel: abl dtb board-id" >&2; exit 1; }
 [[ $(fdtget "$abl" / region_country) == PRC ]] || { echo "pkg-kernel: abl dtb region_country" >&2; exit 1; }
 [[ $(fdtget -t x "$abl" /reserved-memory/splash_region reg) == "0 d5100000 0 2b00000" ]] || { echo "pkg-kernel: abl dtb splash_region" >&2; exit 1; }
+[[ $(fdtget "$abl" /chosen/framebuffer@d5100000 status) == okay ]] || { echo "pkg-kernel: abl dtb framebuffer" >&2; exit 1; }
+[[ $(fdtget "$abl" /soc@0/spmi@c400000/pmic@0/nvram@7100 compatible) == qcom,spmi-sdam ]] || { echo "pkg-kernel: abl dtb sdam nvram@7100" >&2; exit 1; }
 [[ $(fdtget -p "$abl" /__symbols__ | wc -l) -ge 1634 ]] || { echo "pkg-kernel: abl dtb symbols" >&2; exit 1; }
 mdss=$(fdtget -t x "$abl" /soc@0/display-subsystem@ae00000 phandle)
 splash=$(fdtget -t x "$abl" /reserved-memory/splash_region phandle)
