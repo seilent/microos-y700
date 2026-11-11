@@ -29,6 +29,7 @@ done
 lsinitrd -f usr/lib/systemd/system/ostree-prepare-root.service.d/10-microos-remap.conf "$img" | grep -qx 'ExecStart=' \
   || { echo "50-initramfs: drop-in has no ExecStart= reset" >&2; exit 1; }
 for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-log usr/libexec/microos/microos-sdam \
+  usr/libexec/microos/microos-bootb usr/lib/microos/slot.conf usr/bin/sha256sum usr/bin/stat usr/bin/readlink "usr/s?bin/blockdev" \
   usr/lib/systemd/system/microos-guard.service etc/microos-initrd-id; do
   grep -qE " $f( |$)" <<< "$list" || { echo "50-initramfs: $f missing" >&2; exit 1; }
 done

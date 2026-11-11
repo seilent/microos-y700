@@ -13,12 +13,17 @@ installkernel() {
 }
 
 install() {
-    inst_multiple mount umount mountpoint sync mkdir mv rm cat tail dd od tr readlink sleep modprobe dmesg journalctl timeout
+    inst_multiple mount umount mountpoint sync mkdir mv rm cat tail dd od tr readlink sleep modprobe dmesg journalctl timeout \
+        sha256sum stat blockdev
     inst_simple "$moddir/microos-guard" /usr/libexec/microos/microos-guard
     inst_simple /usr/libexec/microos/microos-sdam
+    inst_simple /usr/libexec/microos/microos-bootb
+    inst_simple /usr/lib/microos/slot.conf
     inst_simple "$moddir/microos-initrd-log" /usr/libexec/microos/microos-initrd-log
     inst_simple "$moddir/microos-guard.service" "$systemdsystemunitdir/microos-guard.service"
     inst_simple "$moddir/efi-device.conf" "$systemdsystemunitdir/dev-disk-by\\x2dpartlabel-microos_efi.device.d/10-microos.conf"
+    inst_simple "$moddir/efi-device.conf" "$systemdsystemunitdir/dev-disk-by\\x2dpartlabel-boot_b.device.d/10-microos.conf"
+    inst_simple "$moddir/efi-device.conf" "$systemdsystemunitdir/dev-disk-by\\x2dpartlabel-boot_a.device.d/10-microos.conf"
     inst_simple "$moddir/switch-root.conf" "$systemdsystemunitdir/initrd-switch-root.service.d/10-microos.conf"
     inst_simple "$moddir/emergency.conf" "$systemdsystemunitdir/emergency.service.d/10-microos.conf"
     inst_simple "$moddir/emergency.conf" "$systemdsystemunitdir/dracut-emergency.service.d/10-microos.conf"

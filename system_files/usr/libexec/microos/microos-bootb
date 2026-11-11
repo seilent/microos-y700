@@ -53,6 +53,10 @@ bootb_write() {
   [ "$(bootb_sha "$2" "$bootb_n")" = "$3" ]
 }
 
+bootb_disk() {
+  bootb_p=$(readlink -f "$1") && readlink -f "$2/${bootb_p##*/}/.."
+}
+
 bootb_prev() {
   bootb_prev_id=""
   bootb_prev_sha=""

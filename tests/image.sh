@@ -482,11 +482,22 @@ for u in emergency dracut-emergency; do
 done
 rm -rf "${unpack:?}"
 grep -qE "/nvmem_qcom-spmi-sdam\.ko" <<< "$list" || fail "initramfs lacks nvmem_qcom-spmi-sdam"
+for f in usr/libexec/microos/microos-bootb usr/lib/microos/slot.conf usr/bin/sha256sum usr/bin/stat usr/bin/readlink "usr/s?bin/blockdev"; do
+  grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
+done
+unpack=$(mktemp -d)
+d='usr/lib/systemd/system/dev-disk-by?x2dpartlabel'
+(cd "$unpack" && lsinitrd --unpack "$img" "$d-microos_efi.device.d/10-microos.conf" "$d-boot_b.device.d/10-microos.conf" \
+  "$d-boot_a.device.d/10-microos.conf")
+for p in microos_efi boot_b boot_a; do
+  [[ $(< "$unpack/usr/lib/systemd/system/dev-disk-by\\x2dpartlabel-$p.device.d/10-microos.conf") == \
+    $'[Unit]\nJobRunningTimeoutSec=45' ]] || fail "initramfs $p device timeout"
+done
+rm -rf "${unpack:?}"
+lsinitrd -f usr/lib/systemd/system/microos-guard.service "$img" | grep -qx 'TimeoutStartSec=180' || fail "microos-guard.service timeout"
 [[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] || fail "initramfs cmdline.d/90-microos.conf"
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
   $'[Service]\nExecStart=\nExecStart=systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd' ]] || fail "initramfs switch-root drop-in"
-[[ $(lsinitrd -f 'usr/lib/systemd/system/dev-disk-by?x2dpartlabel-microos_efi.device.d/10-microos.conf' "$img") == \
-  $'[Unit]\nJobRunningTimeoutSec=45' ]] || fail "initramfs microos_efi device timeout"
 [[ $(lsinitrd -f etc/microos-initrd-id "$img") =~ ^$kver\ [0-9]{8}T[0-9]{6}Z$ ]] || fail "initramfs microos-initrd-id"
 lsinitrd -f usr/lib/systemd/system/ostree-prepare-root.service "$img" | grep -qx 'ExecStart=/usr/lib/ostree/ostree-prepare-root /sysroot' \
   || fail "ostree-prepare-root.service ExecStart changed"
