@@ -31,7 +31,7 @@ nevra='^([A-Za-z0-9][A-Za-z0-9._+~^-]*)-([A-Za-z0-9._+~^]+)-([A-Za-z0-9._+~^]+)\
 while IFS=$'\t' read -r name srpm vendor; do
   [[ $vendor == MicroOS ]] || continue
   case $name in
-    microos-kernel|microos-steam-seed) ;;
+    microos-kernel) ;;
     *)
       [[ $srpm =~ $nevra && $srpm != *..* ]] || fail "bad source rpm name $srpm for the MicroOS package $name"
       found=("$pkgs"/*/"$srpm")

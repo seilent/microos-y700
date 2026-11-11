@@ -118,28 +118,6 @@ jobs:
           done
           rm -rf "$RUNNER_TEMP/oci" "$RUNNER_TEMP/tree"
 
-      - name: Seed
-        id: seed
-        run: |
-          rpms=("$RUNNER_TEMP"/pkgs/steam-bootstrap/microos-steam-seed-*.aarch64.rpm)
-          [[ ${#rpms[@]} == 1 && -f ${rpms[0]} ]] || { echo "::error::expected one microos-steam-seed RPM, got ${rpms[*]}"; exit 1; }
-          sha=$(sha256sum < "${rpms[0]}" | cut -d' ' -f1)
-          mkdir -p "$RUNNER_TEMP/seed"
-          podman run --rm --network=none -v "$RUNNER_TEMP/pkgs/steam-bootstrap:/rpms:ro" -v "$RUNNER_TEMP/seed:/seed" "$FEDORA" sh -c '
-            set -eu
-            cd /seed
-            rpm2archive -n - < "/rpms/$1" | tar -x --no-same-owner
-            t=$(rpm -qp --qf "%{BUILDTIME}" "/rpms/$1")
-            find . -type d -exec chmod 755 {} + -exec touch -d "@$t" {} +' sh "${rpms[0]##*/}"
-          want=$(printf '%s\n' 'usr d' 'usr/share d' 'usr/share/licenses d' 'usr/share/licenses/microos-steam-seed d' \
-            'usr/share/licenses/microos-steam-seed/steam_subscriber_agreement.txt f' 'usr/share/microos-seed d' \
-            'usr/share/microos-seed/steam-seed.tar.zst f' 'usr/share/microos-seed/steam-seed.version f')
-          got=$(cd "$RUNNER_TEMP/seed" && find . -mindepth 1 -printf '%P %y\n' | LC_ALL=C sort)
-          [[ $got == "$want" ]] || { echo "::error::seed RPM payload is not the allowed file list: $got"; exit 1; }
-          echo "rpm_sha256=$sha" >> "$GITHUB_OUTPUT"
-          echo "${rpms[0]##*/} $sha"
-          find "$RUNNER_TEMP/seed" -printf '%M %TY-%Tm-%Td %TT %s %P\n'
-
       - name: Version
         id: version
         run: |
@@ -168,39 +146,11 @@ jobs:
           KERNEL_REF: ${{ steps.kernel.outputs.ref }}
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.push_tag }}
-          SEED: ${{ steps.seed.outputs.rpm_sha256 }}
         run: |
           podman build \
             --build-arg "KERNEL_REF=$KERNEL_REF" \
             --build-arg "MICROOS_VERSION=$VERSION" \
-            --build-arg "MICROOS_SEED=$SEED" \
-            --build-context "pkgs=$RUNNER_TEMP/pkgs" \
-            --build-context "seed=$RUNNER_TEMP/seed" \
             -t "$IMAGE:$TAG" .
-          base=$(sed -n 's/^FROM \([^ ]*\/fedora-bootc:[^ ]*\)$/\1/p' Containerfile)
-          [[ -n $base ]] || { echo "::error::no fedora-bootc FROM line in Containerfile"; exit 1; }
-          mapfile -t want < <(podman image inspect --format '{{range .RootFS.Layers}}{{println .}}{{end}}' "$base" | sed '/^$/d')
-          mapfile -t got < <(podman image inspect --format '{{range .RootFS.Layers}}{{println .}}{{end}}' "$IMAGE:$TAG" | sed '/^$/d')
-          n=${#want[@]}
-          [[ $n -gt 0 && ${got[*]:0:n} == "${want[*]}" ]] || { echo "::error::image layers do not start with the $base layers"; exit 1; }
-          echo "seed_index=$n" >> "$GITHUB_OUTPUT"
-          echo "::notice::seed layer diff id ${got[n]}"
-          if cfg=$(skopeo inspect --no-creds --config "docker://$IMAGE:testing" 2> "$RUNNER_TEMP/err"); then
-            old=$(jq -r '.config.Labels["microos.seed"] // empty' <<< "$cfg")
-            if [[ $old == "$SEED" ]]; then
-              jq -e --arg d "${got[n]}" '.rootfs.diff_ids | index($d)' <<< "$cfg" > /dev/null \
-                || { echo "::error::seed RPM $SEED is the one in $IMAGE:testing, but seed layer ${got[n]} is not in it"; exit 1; }
-              echo "same_seed=true" >> "$GITHUB_OUTPUT"
-              echo "seed layer diff id matches $IMAGE:testing"
-            else
-              echo "::notice::seed RPM differs from $IMAGE:testing (${old:-none}), no layer comparison"
-            fi
-          elif grep -qiE 'manifest unknown|404' "$RUNNER_TEMP/err"; then
-            echo "::notice::no $IMAGE:testing, no layer comparison"
-          else
-            echo "::error::$(cat "$RUNNER_TEMP/err")"
-            exit 1
-          fi
           podman image inspect --format '{{.Size}}' "$IMAGE:$TAG" | awk '{ printf "image %.2f GB\n", $1 / 1e9 }'
 
       - name: steamos-manager config
@@ -225,13 +175,7 @@ jobs:
 
       - name: Repo tests passed earlier
         if: steps.testcache.outputs.cache-hit == 'true'
-        run: echo "::notice::EQ chains and the repo script tests passed for key ${{ steps.testkey.outputs.sum }}, skipped"
-
-      - name: EQ chains
-        if: steps.testcache.outputs.cache-hit != 'true'
-        run: |
-          podman run --rm -v "$PWD:/repo:ro" "$FEDORA" \
-            sh -c '/repo/build/pin-pipewire.sh /repo/packages/pipewire-aptx/SOURCE.env pulseaudio-utils python3-gobject python3-numpy dbus-daemon gcc-c++ ladspa-devel util-linux && /repo/tests/audio-eq.sh'
+        run: echo "::notice::Repo script tests passed for key ${{ steps.testkey.outputs.sum }}, skipped"
 
       - name: Steam module on Python 3.13
         run: |
@@ -261,7 +205,7 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin main
           PKG_HASH_BASE=FETCH_HEAD tests/pkg-hash.sh
-          podman run --rm -v "$PWD/tests:/tests:ro" -v "$RUNNER_TEMP/pkgs/steam-bootstrap:/seed-rpm:ro" "$IMAGE:$TAG" /tests/image.sh
+          podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/image.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/helpers.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/storage.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootimg.sh
@@ -270,9 +214,7 @@ jobs:
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/session.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/microos-session.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-launcher.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-seed.sh
           podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-libs.sh
-          podman run --rm -v "$PWD/tests:/tests:ro" -v "$RUNNER_TEMP/pkgs/lsfg-vk:/lsfg-vk:ro" "$IMAGE:$TAG" /tests/lsfg-loader.sh /lsfg-vk
 
       - name: Source RPMs
         env:
@@ -300,23 +242,6 @@ jobs:
           digest=$(cat "$RUNNER_TEMP/digest")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "$IMAGE:$TAG $digest"
-
-      - name: Seed layer
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-          N: ${{ steps.build.outputs.seed_index }}
-          SAME: ${{ steps.build.outputs.same_seed }}
-        run: |
-          layer=$(skopeo inspect --no-creds --raw "docker://$IMAGE@$DIGEST" | jq -r --argjson n "$N" '.layers[$n] | "\(.digest) \(.size)"')
-          [[ $layer =~ ^sha256:[0-9a-f]{64}\ [0-9]+$ ]] || { echo "::error::no seed layer at $N: $layer"; exit 1; }
-          echo "::notice::seed layer $layer"
-          if [[ $SAME == true ]]; then
-            if skopeo inspect --no-creds --raw "docker://$IMAGE:testing" | jq -e --arg d "${layer%% *}" '[.layers[].digest] | index($d)' > /dev/null; then
-              echo "seed layer blob matches $IMAGE:testing"
-            else
-              echo "::warning::seed layer diff id matches $IMAGE:testing but blob ${layer%% *} is not in it; updates download the seed again"
-            fi
-          fi
 
       - name: Unsigned check
         env:
@@ -416,6 +341,7 @@ jobs:
           MICROOS_SOURCE_CACHE: ${{ env.MODE == 'full' && format('{0}/cache', runner.temp) || '' }}
         run: |
           start=$SECONDS
+          mkdir -p "$RUNNER_TEMP/srpms/pkgs"
           build/source-artifact.sh "$RUNNER_TEMP/srpms/srpms.tsv" "$RUNNER_TEMP/source" "$MODE" "$RUNNER_TEMP/srpms/pkgs"
           echo "$((SECONDS - start)) s"
 
@@ -472,7 +398,7 @@ jobs:
           . packages/kernel/SOURCE.env
           names=$(printf '%s\n' "microos-$SHORT.tar.gz" "linux-$KERNEL_VERSION.tar.xz")
           if [[ $MODE == full ]]; then
-            names+=$'\n'$(awk -F'\t' '$2 != "(none)" && ($3 != "MicroOS" || ($1 != "microos-kernel" && $1 != "microos-steam-seed")) { print $2 }' \
+            names+=$'\n'$(awk -F'\t' '$2 != "(none)" && ($3 != "MicroOS" || $1 != "microos-kernel") { print $2 }' \
               "$RUNNER_TEMP/srpms/srpms.tsv" | sort -u)
           fi
           cd "$RUNNER_TEMP/source"

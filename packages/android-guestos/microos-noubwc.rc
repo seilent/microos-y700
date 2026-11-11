@@ -1,2 +1,0 @@
-on early-init
-    setprop debug.mesa.tu.debug noubwc

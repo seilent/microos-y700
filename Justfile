@@ -29,11 +29,6 @@ pkg name:
       podman rm "$ctr" >/dev/null
     done
     (( ${#deps[@]} == 0 )) || mounts=(-v "$PWD/$depdir:/deps:ro,Z")
-    srcvar=${1^^}_SRC
-    srcvar=${srcvar//-/_}
-    if [[ " microset " == *" $1 "* && -n ${!srcvar:-} ]]; then
-      mounts+=(-v "$(realpath "${!srcvar}"):/$1-src:ro,Z" -e "$srcvar=/$1-src")
-    fi
     podman build --memory=14g --cpu-period=100000 --cpu-quota=800000 -t {{builder}} -f build/pkg.Containerfile build
     img={{builder}}
     if [[ -f packages/$1/Containerfile ]]; then
@@ -182,12 +177,7 @@ test-services:
       python3 /repo/tests/proton-hook/hook.py
     run -v "$PWD/system_files/usr/bin/steamos-update:/usr/bin/steamos-update:ro,Z" "$fedora" \
       sh -c "$dnf systemd-udev && /repo/tests/helpers.sh"
-    pin="/repo/build/pin-pipewire.sh /repo/packages/pipewire-aptx/SOURCE.env"
-    run "$fedora" sh -c "$pin pulseaudio-utils python3-gobject python3-numpy dbus-daemon gcc-c++ ladspa-devel util-linux && /repo/tests/audio-eq.sh"
     run "$fedora" sh -c "$dnf jq util-linux systemd-udev && /repo/tests/storage.sh"
     run "$fedora" sh -c "$dnf jq python3 util-linux systemd && /repo/tests/microos-session.sh"
     run "$fedora" sh -c "$dnf python3 rpm-build rpm-sign gnupg2 cpio && /repo/tests/openh264.sh"
     run "$fedora" sh -c "$dnf git-core && /repo/tests/pkg-hash.sh"
-    just pkg microset
-    just pkg gamescope-session
-    run "$fedora" sh -c "$dnf /repo/out/pkg/gamescope-session/*.noarch.rpm && /repo/tests/session.sh"

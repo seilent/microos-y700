@@ -1,5 +1,0 @@
-FROM localhost/microos-pkg-builder
-
-RUN dnf -y --setopt=install_weak_deps=False install \
-      ladspa-devel gcc-c++ python3-numpy \
- && dnf clean all
