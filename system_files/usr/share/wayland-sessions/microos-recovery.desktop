@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=MicroOS Recovery
-Exec=gamescope-session-plus recovery
-Type=Application
-DesktopNames=recovery
-NoDisplay=true

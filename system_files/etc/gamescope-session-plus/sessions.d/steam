@@ -1,3 +1,0 @@
-short_session_recover() {
-  echo "microos: short Steam session, recovery is off" >&2
-}

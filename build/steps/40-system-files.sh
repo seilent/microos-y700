@@ -2,7 +2,6 @@
 set -euo pipefail
 
 cp -a /ctx/system_files/. /
-python3 -m compileall -q --invalidation-mode checked-hash /usr/share/microos/python
 
 while read -r t u g; do
   if [[ $t == m && $u == micro ]] && ! grep -q "^$g:" /etc/group; then
@@ -39,5 +38,7 @@ systemctl mask \
   systemd-hibernate.service \
   systemd-hybrid-sleep.service \
   systemd-suspend-then-hibernate.service \
-  bootc-fetch-apply-updates.timer
+  bootc-fetch-apply-updates.timer \
+  bootc-generic-growpart.service \
+  microos-update-check.timer
 systemctl --global mask mpris-proxy.service

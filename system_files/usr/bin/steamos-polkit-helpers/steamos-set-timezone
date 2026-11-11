@@ -1,3 +1,0 @@
-#!/usr/bin/bash
-set -eu
-exec /usr/bin/timedatectl set-timezone "$1"

@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-printf 'pkill %s\n' "$*" >> "$STUB_LOG"
-[[ ! -e $STUB_DIR/gone ]]

@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-echo "bootc $*" >> "$FAKE/calls"
-[[ ! -e $FAKE/bootc-fails ]]
