@@ -95,6 +95,47 @@ for f in "$out"/*; do
   esac
 done
 
+if [[ -n ${KROUND:-} ]]; then
+  for f in root.simg efi.img efi.simg fw.SHA256SUMS; do
+    [[ ! -e $out/$f ]] || fail "--kround set has $f"
+  done
+  [[ $DEPLOYMENT == "$COMMIT.0" ]] || fail "DEPLOYMENT $DEPLOYMENT is not $COMMIT.0"
+  n=0
+  while read -r name id; do
+    info=$(unpack_bootimg --boot_img "$out/$name" --out "$w/unpack" --format=info)
+    c=$(sed -n 's/^command line args: //p' <<< "$info")
+    cw=" $c "
+    (( ${#c} <= 440 )) || fail "$name: cmdline ${#c} bytes"
+    [[ $name == "boot-$KROUND-stub"[17]-* ]] || fail "$name: not a $KROUND stub image with the preset"
+    for k in "microos.kround=$KROUND" "microos.deploy=$DEPLOYMENT" "microos.id=${id:0:12}"; do
+      [[ $cw == *" $k "* ]] || fail "$name: no $k in the cmdline"
+    done
+    [[ $cw =~ \ ostree=/ostree/boot\.[01]/default/[0-9a-f]{64}/[0-9]+\  ]] || fail "$name: ostree= is not a boot link"
+    [[ $cw == *" microos.test="* ]] || fail "$name: no microos.test"
+    [[ $cw == *" maxcpus="[17]" "* ]] || fail "$name: no stub maxcpus"
+    case $name in
+      *-noroot*) [[ $cw == *" root=PARTLABEL=microos_missing "* ]] || fail "$name: root= not replaced" ;;
+      *) [[ $cw == *" root=PARTLABEL=microos "* ]] || fail "$name: no root=PARTLABEL=microos" ;;
+    esac
+    avb=$(avbtool info_image --image "$out/$name")
+    grep -q 'Partition Name: *boot$' <<< "$avb" || fail "$name: AVB partition name"
+    (( $(stat -c %s "$out/$name") == 100663296 )) || fail "$name: size is not 100663296"
+    margin=$(python3 "$repo/build/y700-abl-budget" "$out/$name" | sed -n 's/^margin //p')
+    (( margin >= 4 * 1024 * 1024 )) || fail "$name: ABL budget margin $margin"
+    echo "install-images: $name cmdline ${#c} bytes, margin $margin"
+    rm -rf "${w:?}/unpack"
+    n=$((n + 1))
+  done < "$out/bootimg.ids"
+  (( n )) || fail "no boot images in the --kround set"
+  echo "install-images: SKIP kernel, ramdisk and DTB comparison: a --kround set has no root image"
+  if (( rc )); then
+    echo "install-images: FAIL"
+  else
+    echo "install-images: PASS"
+  fi
+  exit "$rc"
+fi
+
 simg_size() {
   python3 - "$1" <<'PY'
 import struct, sys

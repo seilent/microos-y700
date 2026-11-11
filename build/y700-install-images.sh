@@ -5,7 +5,7 @@ me=y700-install-images
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 helper=localhost/microos-y700-install
-usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>] [--dev-sudo] [--tplg <Lenovo-Y700-TB321FU-tplg.bin>]"
+usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>] [--dev-sudo] [--tplg <Lenovo-Y700-TB321FU-tplg.bin>] [--kround <round> --deployment <checksum>.<serial>]"
 root_part=726392975360
 efi_part=1073741824
 f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota panic" "stub1f slota emergency"
@@ -23,7 +23,7 @@ die() { echo "$me: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
 image="" channel="" vendor="" nonhlos="" btfm="" wifi="" wlanbd="" tplg="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
-panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 devsudo=0 inner=0 owner=""
+panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 devsudo=0 inner=0 owner="" kround="" bdeploy=""
 specs=("")
 while (( $# )); do
   case $1 in
@@ -36,6 +36,8 @@ while (( $# )); do
     --wlan-board) wlanbd=${2:?$usage}; shift 2 ;;
     --dev-sudo) devsudo=1; shift ;;
     --tplg) tplg=${2:?$usage}; shift 2 ;;
+    --kround) kround=${2:?$usage}; shift 2 ;;
+    --deployment) bdeploy=${2:?$usage}; shift 2 ;;
     --authorized-keys) keys=${2:?$usage}; shift 2 ;;
     --work) work=${2:?$usage}; shift 2 ;;
     --out) out=${2:?$usage}; shift 2 ;;
@@ -57,9 +59,20 @@ imgrepo=${BASH_REMATCH[1]}
 [[ $panel == boe || $panel == csot ]] || die "--panel is boe or csot"
 [[ $size =~ ^[0-9]+$ ]] || die "--size is a byte count"
 [[ -z $wlanbd || $wlanbd =~ ^bdwlan\.e[0-9a-f]{2}$ ]] || die "--wlan-board is bdwlan.e<two hex digits>"
+if [[ -n $kround || -n $bdeploy ]]; then
+  [[ $kround =~ ^p[0-9][a-z]?(-[a-z]+)?$ ]] || die "--kround is a round name like p1a or p1a-hang, got '$kround'"
+  [[ $bdeploy =~ ^[0-9a-f]{64}\.[0-9]+$ ]] || die "--deployment is <checksum>.<serial> from ostree admin status, got '$bdeploy'"
+  (( bootimg )) || die "--kround builds boot images only, --no-bootimg leaves nothing"
+  (( ${#specs[@]} > 1 )) || specs+=("stub1 1")
+  re=' (1|noguard|bootloader|panic|emergency|wdhang|gptdump) '
+  for s in "${specs[@]:1}"; do
+    [[ " $s " == *" stub1 "* || " $s " == *" stub7 "* ]] || die "--kround image '$s' has no stub with the fastboot preset"
+    [[ " $s " =~ $re ]] || die "--kround image '$s' has no test case, ttyGS0 needs microos.test"
+  done
+fi
 
 spec_name() {
-  local x name=boot
+  local x name=boot${kround:+-$kround}
   for x in $1; do
     case $x in
       1) name+=-test1 ;;
@@ -115,6 +128,7 @@ if (( ! inner )); then
   [[ -z $wlanbd ]] || args+=(--wlan-board "$wlanbd")
   (( ! devsudo )) || args+=(--dev-sudo)
   [[ -z $tplg ]] || { args+=(--tplg /in/tplg.bin); wifimount+=(-v "$(realpath "$tplg"):/in/tplg.bin:ro"); }
+  [[ -z $kround ]] || args+=(--kround "$kround" --deployment "$bdeploy")
   for s in "${specs[@]:1}"; do
     args+=(--bootimg "$s")
   done
@@ -196,11 +210,13 @@ ostree admin deploy --sysroot="$T" --os=default --no-merge --origin-file="$w/ori
 deps=("$T"/ostree/deploy/default/deploy/*.0)
 (( ${#deps[@]} == 1 )) && [[ -d ${deps[0]} ]] || die "expected one deployment"
 dep=${deps[0]}
+[[ -z $kround || ${dep##*/} == "$bdeploy" ]] || die "$image deploys as ${dep##*/}, not as the device's $bdeploy"
 var=$T/ostree/deploy/default/var
 entries=("$T"/boot/loader/entries/*.conf)
 (( ${#entries[@]} == 1 )) && [[ -f ${entries[0]} ]] || die "expected one BLS entry"
 bls() { sed -n "s/^$1[[:space:]]\+//p" "${entries[0]}"; }
 options=$(bls options)
+[[ -z $kround ]] || options+=" microos.kround=$kround"
 
 log "seed /var"
 if ostree ls --repo="$R" "$commit" /var > /dev/null 2>&1; then
@@ -305,7 +321,9 @@ if (( bootimg )); then
   [[ -n $dtbrel ]] || die "the deployment's bootimg.conf has no $dtbvar"
   dtb=$dep/usr/lib/modules/$kver/dtb/$dtbrel
   [[ -f $dtb ]] || die "no $dtbrel in the deployment for kernel $kver"
-  for s in "${specs[@]}"; do
+  first=0
+  [[ -z $kround ]] || first=1
+  for s in "${specs[@]:first}"; do
     name=$(spec_name "$s")
     log "$name${s:+ ($s)}"
     id=$(mkbootimg_variant "$s" "$name")
@@ -320,6 +338,16 @@ if (( bootimg )); then
     log "$name: cmdline ${#c} bytes"
   done
   printf '%s\n' "${ids[@]}" > "$out/bootimg.ids"
+fi
+
+if [[ -n $kround ]]; then
+  printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=1\nKROUND=%q\nOPTIONS=%q\n' \
+    "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$kround" "$options" > "$out/build.env"
+  (cd "$out" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$w/sums"
+  mv "$w/sums" "$out/SHA256SUMS"
+  cat "$out/SHA256SUMS" >&2
+  log "done: $out, $kround boot images for $bdeploy, no root.simg or efi.img"
+  exit 0
 fi
 
 log "root free space"
