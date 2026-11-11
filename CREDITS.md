@@ -40,6 +40,15 @@ packaging patches, six of mine and an OGC patch backported by me (`0003` to `000
 in each package); `gamescope-session-steam` is built as is. License texts in `packages/gamescope/` and
 `packages/gamescope-session/`.
 
+## Audio
+
+| What | Origin | Author | License |
+|---|---|---|---|
+| `audioreach-topology` m4 macros | [Linaro audioreach-topology](https://git.codelinaro.org/linaro/qcomlt/audioreach-topology) `1d4c4e337d` | Linaro Ltd | BSD-3-Clause |
+
+`audioreach-topology` carries my legacy TDM module and subgraph and my Y700 topology (`PATCHES.md` in the package).
+License text in `packages/audioreach-topology/`.
+
 ## Base
 
 | What | Origin | Author | License |
