@@ -139,6 +139,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "$push_tag $final_tag"
 
+      - name: Stub
+        run: tests/stub.sh
+
       - name: Build
         id: build
         env:
@@ -159,10 +162,9 @@ jobs:
           git fetch --no-tags --depth=1 origin main
           PKG_HASH_BASE=FETCH_HEAD tests/pkg-hash.sh
           podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/image.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootimg.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootok.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/guard.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/update.sh
+          for t in bootimg bootok guard slot update usb-console; do
+            podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" "/tests/$t.sh"
+          done
 
       - name: Source RPMs
         env:
