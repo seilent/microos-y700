@@ -205,16 +205,30 @@ jobs:
           skopeo copy --quiet --authfile "$auth" "docker://$IMAGE@$DIGEST" "oci:$oci"
           [[ $(jq -r '.manifests[0].digest' "$oci/index.json") == "$DIGEST" ]] || { echo "::error::oci copy is not $DIGEST"; exit 1; }
           python3 - "$oci" "$DIGEST" <<'PY'
-          import json, sys, tarfile
+          import json, subprocess, sys, tarfile
           oci, digest = sys.argv[1:]
           blob = lambda d: f"{oci}/blobs/sha256/{d.split(':', 1)[1]}"
           layers = json.load(open(blob(digest)))["layers"]
           bad = []
           for layer in layers:
-              with tarfile.open(blob(layer["digest"]), "r|*") as t:
+              kind = layer["mediaType"]
+              path = blob(layer["digest"])
+              if kind.endswith("+zstd"):
+                  proc = subprocess.Popen(["zstd", "-dc", path], stdout=subprocess.PIPE)
+                  t = tarfile.open(fileobj=proc.stdout, mode="r|")
+              elif kind.endswith(("+gzip", ".tar.gzip", ".tar")):
+                  proc = None
+                  t = tarfile.open(path, "r|*")
+              else:
+                  print(f"::error::layer {layer['digest']} has media type {kind}, not tar, gzip or zstd")
+                  sys.exit(1)
+              with t:
                   for m in t:
                       bad += [f"{layer['digest']} {m.name} {k}" for k in m.pax_headers
                               if k.startswith(("SCHILY.xattr.user.overlay.", "SCHILY.xattr.trusted.overlay."))]
+              if proc and proc.wait() != 0:
+                  print(f"::error::zstd failed on layer {layer['digest']}")
+                  sys.exit(1)
           if bad:
               print("\n".join(bad[:20]))
               print(f"::error::{len(bad)} overlay xattrs in the layers of {digest}")
