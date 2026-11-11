@@ -10,7 +10,7 @@ if [ -n "$dir" ]; then
 else
   [ -b "$dev" ] || exit 0
   mkdir -p "$mnt"
-  mountpoint -q "$mnt" || mount -t vfat -o umask=0077 "$dev" "$mnt" || exit 0
+  mountpoint -q "$mnt" || timeout 30 mount -t vfat -o umask=0077 "$dev" "$mnt" || exit 0
   efi=$mnt
 fi
 
@@ -33,7 +33,7 @@ n=$((n + 1))
   echo "== dmesg"
   dmesg 2> /dev/null
   echo "== journal"
-  journalctl -b -o short-monotonic --no-pager 2> /dev/null
+  timeout 30 journalctl -b -o short-monotonic --no-pager 2> /dev/null
 } > "$logs/initrd-$n.txt"
 for f in "$logs"/initrd-*.txt; do
   [ -e "$f" ] || continue
