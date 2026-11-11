@@ -5,3 +5,5 @@
 0005-dt-bindings-backlight-kinetic-ktz8866-Add-boost-and-.patch
 0006-backlight-ktz8866-Set-boost-OVP-inductor-and-LED-cur.patch
 0013-iommu-arm-smmu-qcom-Add-SM8650-MDSS-compatible-to-cl.patch
+0007-dt-bindings-input-touchscreen-Add-Novatek-NT36523-SP.patch
+0008-Input-add-Novatek-NT36523-SPI-touchscreen-driver.patch
