@@ -150,7 +150,9 @@ kept=(
   /usr/lib/tmpfiles.d/microos.conf
   /usr/lib/udev/rules.d/90-microos-usb-console.rules
   /usr/libexec/microos/microos-boot-ok
+  /usr/libexec/microos/microos-bootb
   /usr/libexec/microos/microos-bootimg-build
+  /usr/libexec/microos/microos-bootimg-update
   /usr/libexec/microos/microos-bootlog
   /usr/libexec/microos/microos-efi-log
   /usr/libexec/microos/microos-fail
@@ -238,7 +240,7 @@ payload=$(( $(sed -n 's/^MICROOS_STUB_PAYLOAD=//p' /usr/lib/microos/stub.conf) )
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad microos-remoteproc microos-stub-pack; do
+for f in microos-slot microos-usb-console microos-vpad microos-remoteproc microos-bootimg-update microos-stub-pack; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad

@@ -218,7 +218,7 @@ jobs:
           git fetch --no-tags --depth=1 origin main
           PKG_HASH_BASE=FETCH_HEAD tests/pkg-hash.sh
           sudo podman run --rm -v "$PWD/tests:/tests:ro" -v "$RUNNER_TEMP/pkgs/steam-bootstrap:/seed-rpm:ro" "$IMAGE:$TAG" /tests/image.sh
-          for t in bootimg bootok guard slot update usb-console session steam-launcher steam-seed; do
+          for t in bootimg bootimg-update bootok guard slot update usb-console session steam-launcher steam-seed; do
             sudo podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" "/tests/$t.sh"
           done
           sudo podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-libs.sh
