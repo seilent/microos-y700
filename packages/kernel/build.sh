@@ -14,15 +14,31 @@ else
 fi
 trap 'rm -rf "$top"' EXIT
 
-tarball=$top/linux-$KERNEL_VERSION.tar.xz
-curl -fsSL --retry 3 -o "$tarball" "$KERNEL_URL"
-echo "$KERNEL_SHA256  $tarball" | sha256sum -c -
-tar -xf "$tarball" -C "$top"
-tree=$top/linux-$KERNEL_VERSION
+tree=$top/linux
+mkdir "$tree"
+if [[ -n ${KERNEL_URL:-} ]]; then
+  tarball=$top/${KERNEL_URL##*/}
+  curl -fsSL --retry 3 -o "$tarball" "$KERNEL_URL"
+  echo "$KERNEL_SHA256  $tarball" | sha256sum -c -
+  tar -xf "$tarball" -C "$tree" --strip-components=1
+  rm "$tarball"
+else
+  git init -q "$top/git"
+  git -C "$top/git" fetch -q --depth 1 "$KERNEL_GIT" "refs/tags/$KERNEL_TAG"
+  commit=$(git -C "$top/git" rev-parse 'FETCH_HEAD^{commit}')
+  if [[ $commit != "$KERNEL_COMMIT" ]]; then
+    echo "$KERNEL_TAG is $commit, expected $KERNEL_COMMIT" >&2
+    exit 1
+  fi
+  git -C "$top/git" archive "$commit" | tar -x -C "$tree"
+  rm -rf "$top/git"
+fi
 
-while read -r p; do
-  patch -d "$tree" -p1 -F0 -N -s --no-backup-if-mismatch < "$src/patches/$p"
-done < "$src/patches/series"
+if [[ -f $src/patches/series ]]; then
+  while read -r p; do
+    patch -d "$tree" -p1 -F0 -N -s --no-backup-if-mismatch < "$src/patches/$p"
+  done < "$src/patches/series"
+fi
 
 dtbs=(sm8650-lenovo-tb321fu sm8650-lenovo-tb321fu-csot sm8650-lenovo-tb321fu-abl)
 cp "$src"/dts/*.dts "$src"/dts/*.dtsi "$tree/arch/arm64/boot/dts/qcom/"
@@ -36,7 +52,7 @@ if [[ -n ${CCACHE_DIR:-} ]] && command -v ccache >/dev/null; then
   ccache -M 5G >/dev/null
   cc="ccache $cc"
 fi
-mk=(make -C "$tree" --no-print-directory -j"$(nproc)" CC="$cc")
+mk=(make -C "$tree" --no-print-directory -j"$(nproc)" CC="$cc" LOCALVERSION=)
 
 "${mk[@]}" -s defconfig
 "$tree/scripts/kconfig/merge_config.sh" -m -O "$tree" "$tree/.config" "$src/tb321fu.config" "$src/microos.config" >/dev/null
@@ -50,9 +66,10 @@ fi
 
 "${mk[@]}" Image modules $(printf "qcom/%s.dtb " "${dtbs[@]}")
 
+kversion=$("${mk[@]}" -s kernelversion)
 kver=$("${mk[@]}" -s kernelrelease)
-if [[ $kver != "$KERNEL_VERSION-microos" ]]; then
-  echo "kernelrelease is $kver, expected $KERNEL_VERSION-microos" >&2
+if [[ $kver != "$kversion-microos" ]]; then
+  echo "kernelrelease is $kver, expected $kversion-microos" >&2
   exit 1
 fi
 
@@ -73,8 +90,9 @@ install -Dm644 "$src/LICENSE.kernel" "$stage/usr/share/licenses/microos-kernel/L
 
 rpmbuild -bb --target aarch64 \
   --define "_topdir $top/rpm" \
-  --define "kversion $KERNEL_VERSION" \
+  --define "kversion ${kversion//-/\~}" \
   --define "kver $kver" \
+  --define "kuname ${kver/-rc/\~rc}" \
   --define "stage $stage" \
   "$src/microos-kernel.spec"
 
