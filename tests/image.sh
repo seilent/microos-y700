@@ -45,7 +45,7 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
   microos-test-wdhang.service)
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
-  microos-bootlog-efi.service microos-grow-root.service "${tests[@]}")
+  microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -53,10 +53,11 @@ done
 got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
-  microos-bootlog-efi.service microos-grow-root.service "${tests[@]}"; do
+  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
-[[ -L /etc/systemd/system/microos-boot-ok.service.wants/microos-bootlog-efi.service ]] || fail "microos-bootlog-efi.service is not wanted by boot ok"
+[[ -L /etc/systemd/system/multi-user.target.wants/microos-bootlog-efi.path ]] || fail "microos-bootlog-efi.path is not wanted by multi-user.target"
+[[ $(systemctl is-enabled microos-bootlog-efi.service) == static ]] || fail "microos-bootlog-efi.service is not static"
 for u in "${tests[@]}"; do
   w=${u#microos-test-}
   systemctl cat "$u" | grep -qx "ConditionKernelCommandLine=microos.test=${w%.service}" || fail "$u has no microos.test condition"
@@ -72,6 +73,7 @@ kept=(
   /etc/ssh/sshd_config.d/10-microos.conf
   /usr/bin/microos-update
   /usr/lib/NetworkManager/conf.d/10-microos.conf
+  /usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
@@ -88,6 +90,7 @@ kept=(
   /usr/lib/microos/boot-ok.conf
   /usr/lib/microos/bootimg.conf
   /usr/lib/microos/slot.conf
+  /usr/lib/microos/stub.conf
   /usr/lib/microos/version
   /usr/lib/sysctl.d/60-microos-yama.conf
   /usr/lib/systemd/journald.conf.d/10-microos.conf
@@ -96,6 +99,7 @@ kept=(
   /usr/lib/systemd/system/microos-boot-deadline.service
   /usr/lib/systemd/system/microos-boot-deadline.timer
   /usr/lib/systemd/system/microos-boot-ok.service
+  /usr/lib/systemd/system/microos-bootlog-efi.path
   /usr/lib/systemd/system/microos-bootlog-efi.service
   /usr/lib/systemd/system/microos-grow-root.service
   /usr/lib/systemd/system/microos-provision.service
@@ -108,9 +112,12 @@ kept=(
   /usr/lib/systemd/system/microos-test-panic.service
   /usr/lib/systemd/system/microos-test-wdhang.service
   /usr/lib/systemd/system/microos-update.service
+  /usr/lib/systemd/system/microos-usb-console.service
+  /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/sysusers.d/microos.conf
   /usr/lib/tmpfiles.d/microos.conf
+  /usr/lib/udev/rules.d/90-microos-usb-console.rules
   /usr/libexec/microos/microos-boot-ok
   /usr/libexec/microos/microos-bootimg-build
   /usr/libexec/microos/microos-bootlog
@@ -118,8 +125,11 @@ kept=(
   /usr/libexec/microos/microos-fail
   /usr/libexec/microos/microos-grow-root
   /usr/libexec/microos/microos-provision
-  /usr/libexec/microos/microos-update-applied
+  /usr/libexec/microos/microos-sdam
+  /usr/libexec/microos/microos-slot
   /usr/libexec/microos/microos-test
+  /usr/libexec/microos/microos-update-applied
+  /usr/libexec/microos/microos-usb-console
   /usr/libexec/microos/prepare-root
   /usr/share/microos/avb/testkey_rsa4096.pem
   /usr/share/microos/keys/microos-backup.pub
@@ -168,8 +178,16 @@ kargs = [
   || fail "AVB test key sha256"
 [[ $(< /usr/lib/systemd/journald.conf.d/10-microos.conf) == $'[Journal]\nStorage=persistent' ]] || fail "journald 10-microos.conf"
 [[ $(< /usr/lib/bootc/install/00-microos.toml) == $'[install.filesystem.root]\ntype = "btrfs"' ]] || fail "00-microos.toml"
-[[ $(< /usr/lib/NetworkManager/conf.d/10-microos.conf) == $'[keyfile]\npath=/var/lib/NetworkManager/system-connections' ]] \
+[[ $(< /usr/lib/NetworkManager/conf.d/10-microos.conf) == $'[keyfile]\npath=/var/lib/NetworkManager/system-connections\n\n[device-microos-usb0]\nmatch-device=interface-name:usb0\nmanaged=1' ]] \
   || fail "NetworkManager 10-microos.conf"
+nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
+[[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
+grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
+for f in microos-slot microos-usb-console; do
+  [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
+done
+[[ $(< /usr/lib/udev/rules.d/90-microos-usb-console.rules) == \
+  'SUBSYSTEM=="tty", KERNEL=="ttyGS0", ENV{SYSTEMD_WANTS}+="serial-getty@ttyGS0.service"' ]] || fail "90-microos-usb-console.rules"
 [[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -' ]] \
   || fail "tmpfiles microos.conf"
 dtb=/usr/lib/modules/$kver/dtb/$(sed -n 's/^MICROOS_DTB=//p' /usr/lib/microos/bootimg.conf)
@@ -187,6 +205,10 @@ execs() {
 [[ $(execs emergency.service ExecStart) == '-/usr/libexec/microos/microos-fail emergency' ]] \
   || fail "effective emergency.service ExecStart: $(execs emergency.service ExecStart)"
 systemctl cat microos-boot-deadline.timer | grep -qx 'OnBootSec=900' || fail "microos-boot-deadline.timer is not 900 s"
+systemctl cat serial-getty@ttyGS0.service | grep -qx 'ConditionKernelCommandLine=microos.test' \
+  || fail "serial-getty@ttyGS0.service has no microos.test condition"
+[[ $(execs serial-getty@ttyGS0.service ExecStart) == '-/usr/sbin/agetty --autologin root '* ]] \
+  || fail "serial-getty@ttyGS0.service ExecStart: $(execs serial-getty@ttyGS0.service ExecStart)"
 systemctl cat sshd.service | grep -qx 'ConditionPathExists=/var/home/micro/.ssh/authorized_keys' \
   || fail "sshd.service has no ConditionPathExists on micro's authorized_keys"
 while read -r u p; do
@@ -252,6 +274,14 @@ for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-lo
   grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
 done
 grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || fail "initramfs does not enable microos-guard.service"
+unpack=$(mktemp -d)
+(cd "$unpack" && lsinitrd --unpack "$img" usr/lib/systemd/system/emergency.service.d/10-microos.conf \
+  usr/lib/systemd/system/dracut-emergency.service.d/10-microos.conf)
+for u in emergency dracut-emergency; do
+  [[ $(< "$unpack/usr/lib/systemd/system/$u.service.d/10-microos.conf") == \
+    $'[Service]\nExecStartPre=-/usr/libexec/microos/microos-initrd-log' ]] || fail "initramfs $u drop-in content"
+done
+rm -rf "${unpack:?}"
 grep -qE "/nvmem_qcom-spmi-sdam\.ko" <<< "$list" || fail "initramfs lacks nvmem_qcom-spmi-sdam"
 [[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] || fail "initramfs cmdline.d/90-microos.conf"
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
