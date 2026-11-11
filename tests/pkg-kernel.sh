@@ -42,7 +42,7 @@ grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-k
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
-  snd-soc-wcd939x novatek-nt36523 aw86927; do
+  snd-soc-wcd939x novatek-nt36523 aw86927 snd-soc-aw88261 snd-soc-sc8280xp; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 
@@ -153,6 +153,29 @@ for d in "$main" "$csot" "$abl"; do
     { echo "pkg-kernel: $n gadget hs graph" >&2; exit 1; }
   [[ $(fdtget "$d" /soc@0/usb@a600000 dr_mode) == peripheral ]] || { echo "pkg-kernel: $n usb_1 dr_mode" >&2; exit 1; }
   [[ $(fdtget -d okay "$d" "$disp/displayport-controller@af54000" status) == disabled ]] || { echo "pkg-kernel: $n dp0 is on" >&2; exit 1; }
+done
+
+i2c8=/soc@0/geniqup@8c0000/i2c@880000
+dai=/soc@0/remoteproc@6800000/glink-edge/gpr/service@1/bedais/dai@28
+link=/sound/speaker-tdm-dai-link
+for d in "$main" "$csot" "$abl"; do
+  n=$(basename "$d")
+  [[ $(fdtget -d okay "$d" "$i2c8" status) == okay ]] || { echo "pkg-kernel: $n i2c8 is off" >&2; exit 1; }
+  for pa in "audio-codec@34 0 120 SpkrLeft" "audio-codec@37 1 128 SpkrRight"; do
+    read -r node ch gpio prefix <<<"$pa"
+    v="$(fdtget "$d" "$i2c8/$node" compatible) $(fdtget "$d" "$i2c8/$node" awinic,audio-channel)"
+    v+=" $(fdtget "$d" "$i2c8/$node" firmware-name) $(fdtget "$d" "$i2c8/$node" sound-name-prefix)"
+    v+=" $(fdtget "$d" "$i2c8/$node" reset-gpios | cut -d' ' -f2-)"
+    [[ $v == "awinic,aw88461 $ch qcom/sm8650/lenovo/tb321fu/aw882xx_acf.bin $prefix $gpio 1" ]] || { echo "pkg-kernel: $n $node $v" >&2; exit 1; }
+  done
+  [[ "$(fdtget "$d" /sound compatible) $(fdtget "$d" /sound model)" == "lenovo,tb321fu-sndcard Lenovo-Y700-TB321FU" ]] ||
+    { echo "pkg-kernel: $n sound card" >&2; exit 1; }
+  v="$(fdtget "$d" "$link/cpu" sound-dai | cut -d' ' -f2) $(fdtget "$d" "$link/cpu" dai-tdm-slot-num)"
+  v+=" $(fdtget "$d" "$link/cpu" dai-tdm-slot-width) $(fdtget "$d" "$link/cpu" dai-tdm-slot-rx-mask)"
+  v+=" $(fdtget "$d" "$link/codec" dai-tdm-slot-rx-mask)"
+  [[ $v == "40 8 32 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0" ]] || { echo "pkg-kernel: $n speaker link $v" >&2; exit 1; }
+  v="$(fdtget "$d" "$dai" reg) $(fdtget "$d" "$dai" clock-names) $(fdtget "$d" "$dai" clocks | cut -d' ' -f2-)"
+  [[ $v == "40 bclk 37 1" ]] || { echo "pkg-kernel: $n sec tdm dai $v" >&2; exit 1; }
 done
 
 dtbo=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-dtbo.img
