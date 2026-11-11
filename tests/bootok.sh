@@ -630,7 +630,7 @@ digest=sha256:$(c 1)
 other=sha256:$(c 2)
 "$applied" > /dev/null || fail "update applied with no expected file"
 [[ ! -e $nap ]] || fail "not applied written with no expected file"
-printf 'deploy=%s\ndigest=%s\nversion=20261013.abc\nimage=ghcr.io/seilent/microos:testing\nstaged=2026-10-13T00:00:00Z\n' "$B" "$other" > "$exp"
+printf 'deploy=%s\ndigest=%s\nversion=20261013.abc\nimage=ghcr.io/seilent/microos-y700:testing\nstaged=2026-10-13T00:00:00Z\n' "$B" "$other" > "$exp"
 echo stale > "$nap"
 "$applied" > /dev/null || fail "update applied by id"
 [[ ! -e $exp && ! -e $nap ]] || fail "files kept after an applied id"

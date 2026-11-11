@@ -7,7 +7,7 @@ Version:        %{kversion}
 Release:        1%{?dist}.microos
 Summary:        Linux kernel for the Lenovo Legion Y700 Gen 3
 License:        GPL-2.0-only WITH Linux-syscall-note
-URL:            https://github.com/seilent/MicroOS
+URL:            https://github.com/seilent/microos-y700
 Vendor:         MicroOS
 ExclusiveArch:  aarch64
 AutoReqProv:    no

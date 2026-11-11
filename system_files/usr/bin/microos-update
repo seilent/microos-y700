@@ -8,7 +8,7 @@ usage() { echo "usage: $me [--check|--discard]" >&2; exit 2; }
 rundir=${MICROOS_RUNDIR:-/run/microos}
 statedir=${MICROOS_STATEDIR:-/var/lib/microos}
 sysroot=${MICROOS_SYSROOT:-/sysroot}
-repo=ghcr.io/seilent/microos
+repo=ghcr.io/seilent/microos-y700
 etc_policy=/etc/containers/policy.json
 etc_policy=${MICROOS_ETC_POLICY:-$etc_policy}
 reserve=2147483648

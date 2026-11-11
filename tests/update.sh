@@ -16,7 +16,7 @@ state=$tmp/state
 run=$tmp/run
 mkdir -p "$tmp/home"
 
-repo=ghcr.io/seilent/microos
+repo=ghcr.io/seilent/microos-y700
 R=$repo:testing
 csum_b=$(printf b%.0s {1..64})
 csum_s=$(printf 5%.0s {1..64})
@@ -157,7 +157,7 @@ cp "$tmp/insecure.json" "$tmp/xdg/containers/policy.json"
 t --check
 want 0
 unset CONTAINERS_POLICY_JSON XDG_CONFIG_HOME
-jq 'del(.transports.docker["ghcr.io/seilent/microos"])' "$policy" > "$tmp/noscope.json"
+jq 'del(.transports.docker["ghcr.io/seilent/microos-y700"])' "$policy" > "$tmp/noscope.json"
 etcpol=$tmp/noscope.json
 t
 want 1
@@ -168,7 +168,7 @@ for k in "$repo:testing" "$repo@$dig_c"; do
   want 1
   has "every $repo scope"
 done
-jq --arg k "$repo:testing" '.transports.docker[$k] = .transports.docker["ghcr.io/seilent/microos"]' "$policy" > "$tmp/override.json"
+jq --arg k "$repo:testing" '.transports.docker[$k] = .transports.docker["ghcr.io/seilent/microos-y700"]' "$policy" > "$tmp/override.json"
 t --check
 want 0
 etcpol=$policy

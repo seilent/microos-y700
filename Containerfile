@@ -35,6 +35,6 @@ RUN bootc container lint --fatal-warnings
 
 ARG MICROOS_SEED
 
-LABEL org.opencontainers.image.source=https://github.com/seilent/MicroOS
+LABEL org.opencontainers.image.source=https://github.com/seilent/microos-y700
 LABEL microos.seed=${MICROOS_SEED}
 LABEL org.opencontainers.image.version=${MICROOS_VERSION}

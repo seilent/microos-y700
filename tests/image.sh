@@ -982,12 +982,12 @@ done
 pol=/etc/containers/policy.json
 keys=(/usr/share/microos/keys/microos.pub /usr/share/microos/keys/microos-backup.pub /usr/share/microos/keys/microos-next.pub)
 jq -e '.default == [{"type": "reject"}]' "$pol" >/dev/null || fail "policy default is not reject"
-jq -e '.transports.docker["ghcr.io/seilent/microos"] == [{"type": "sigstoreSigned", "keyPaths": $ARGS.positional,
-  "signedIdentity": {"type": "matchRepository"}}]' --args "${keys[@]}" < "$pol" >/dev/null || fail "policy scope ghcr.io/seilent/microos"
+jq -e '.transports.docker["ghcr.io/seilent/microos-y700"] == [{"type": "sigstoreSigned", "keyPaths": $ARGS.positional,
+  "signedIdentity": {"type": "matchRepository"}}]' --args "${keys[@]}" < "$pol" >/dev/null || fail "policy scope ghcr.io/seilent/microos-y700"
 for k in "${keys[@]}"; do
   openssl pkey -pubin -noout -in "$k" 2>/dev/null || fail "$k is not a public key"
 done
-[[ $(< /etc/containers/registries.d/ghcr-microos.yaml) == $'docker:\n  ghcr.io/seilent/microos:\n    use-sigstore-attachments: true' ]] \
+[[ $(< /etc/containers/registries.d/ghcr-microos.yaml) == $'docker:\n  ghcr.io/seilent/microos-y700:\n    use-sigstore-attachments: true' ]] \
   || fail "registries.d ghcr-microos.yaml"
 
 mkdir -p "$tmp/etc/ssh"

@@ -17,7 +17,7 @@ Version:        26.2.5
 Release:        1%{?dist}.microos
 Summary:        Mesa and the Fossilize layer for Lepton's Android guests
 License:        %{spdx}
-URL:            https://github.com/seilent/MicroOS
+URL:            https://github.com/seilent/microos-y700
 Source0:        https://archive.mesa3d.org/mesa-%{version}.tar.xz
 Source1:        https://github.com/ValveSoftware/Fossilize/archive/%{fossilize_ref}/Fossilize-%{fossilize_ref}.tar.gz
 Source2:        https://github.com/Tencent/rapidjson/archive/%{rapidjson_ref}/rapidjson-%{rapidjson_ref}.tar.gz

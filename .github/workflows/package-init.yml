@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: "Package name under ghcr.io/seilent/microos/pkg/"
+        description: "Package name under ghcr.io/seilent/microos-y700/pkg/"
         required: true
         type: string
 
@@ -24,7 +24,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           [[ $NAME =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "::error::bad name $NAME"; exit 1; }
-          repo=ghcr.io/seilent/microos/pkg/$NAME
+          repo=ghcr.io/seilent/microos-y700/pkg/$NAME
           if skopeo inspect --no-creds --raw "docker://$repo:init" > /dev/null 2>&1; then
             echo "$repo:init exists"
             exit 0
@@ -33,7 +33,7 @@ jobs:
           echo "$NAME" > "$dir/init"
           printf 'FROM scratch\nCOPY init /init\n' > "$dir/Containerfile"
           podman build -f "$dir/Containerfile" \
-            --label org.opencontainers.image.source=https://github.com/seilent/MicroOS \
+            --label org.opencontainers.image.source=https://github.com/seilent/microos-y700 \
             -t "$repo:init" "$dir"
           podman login ghcr.io -u "$GH_ACTOR" --password-stdin <<< "$GH_TOKEN"
           podman push "$repo:init"

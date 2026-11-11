@@ -3,7 +3,7 @@
   "transports": {
     "docker": {
       "": [{"type": "insecureAcceptAnything"}],
-      "ghcr.io/seilent/microos": [{
+      "ghcr.io/seilent/microos-y700": [{
         "type": "sigstoreSigned",
         "keyPaths": ["/usr/share/microos/keys/microos.pub", "/usr/share/microos/keys/microos-backup.pub", "/usr/share/microos/keys/microos-next.pub"],
         "signedIdentity": {"type": "matchRepository"}

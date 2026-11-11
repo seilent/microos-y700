@@ -3,7 +3,7 @@
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
   <vendor>MicroOS</vendor>
-  <vendor_url>https://github.com/seilent/MicroOS</vendor_url>
+  <vendor_url>https://github.com/seilent/microos-y700</vendor_url>
 
   <action id="net.seilent.MicroOs.storage.format-device">
     <description>Format a storage device</description>

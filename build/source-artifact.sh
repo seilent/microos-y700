@@ -4,7 +4,7 @@ set -euo pipefail
 fedora=registry.fedoraproject.org/fedora:44@sha256:1ff9eb02e4e2d7fb1175becac7139b2960c4fdcccedce81c86ec25b98ef3124d
 koji=https://kojipkgs.fedoraproject.org/packages
 key=6d9f90a6
-repo=https://github.com/seilent/MicroOS
+repo=https://github.com/seilent/microos-y700
 
 fail() { echo "source-artifact: $*" >&2; exit 1; }
 

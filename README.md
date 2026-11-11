@@ -1,16 +1,11 @@
-# MicroOS
+# MicroOS for the Legion Y700
 
-A bootc image for the AYANEO Pocket MICRO 2, built on Fedora (`registry.fedoraproject.org/fedora-bootc:44`).
+A bootc image for the Lenovo Legion Y700 (2025, TB321FU), built on Fedora (`registry.fedoraproject.org/fedora-bootc:44`).
 
-Sessions: Steam game mode and a Hyprland desktop. Pocket MICRO 2 only.
+It boots from slot b, next to the stock Android on slot a. Session: Steam game mode.
 
-CI builds the `testing` channel, `ghcr.io/seilent/microos:testing`, from `main`, and `ghcr.io/seilent/microos:dev-<sha>`
-from other branches, each with an SD card image as a workflow artifact.
-
-## microSD Format
-
-After the Format confirm in Settings > Storage, release A, then hold it for 1 s within 15 s.
-A MicroOS card formats the same way, except the one the PM2 is running from.
+CI builds the `testing` channel, `ghcr.io/seilent/microos-y700:testing`, from `main`, and
+`ghcr.io/seilent/microos-y700:dev-<sha>` from other branches.
 
 ## License
 
@@ -19,4 +14,4 @@ in [CREDITS.md](CREDITS.md).
 
 MicroOS is not provided or supported by the Fedora Project. Official Fedora is available at
 [fedoraproject.org](https://fedoraproject.org/). Steam is a trademark of Valve. MicroOS is not affiliated
-with Valve or AYANEO.
+with Valve or Lenovo.

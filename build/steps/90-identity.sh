@@ -12,7 +12,7 @@ VERSION_ID=44
 PRETTY_NAME="MicroOS"
 IMAGE_VERSION=$v
 DEFAULT_HOSTNAME=microos
-HOME_URL=https://github.com/seilent/MicroOS
+HOME_URL=https://github.com/seilent/microos-y700
 OS
 
 install -d /usr/lib/microos

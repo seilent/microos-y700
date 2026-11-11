@@ -1,3 +1,3 @@
 FROM scratch
 COPY *.rpm /rpms/
-LABEL org.opencontainers.image.source=https://github.com/seilent/MicroOS
+LABEL org.opencontainers.image.source=https://github.com/seilent/microos-y700

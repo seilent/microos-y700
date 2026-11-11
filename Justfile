@@ -106,24 +106,24 @@ pkg-push name:
         exit 1
       fi
     done
-    repo=ghcr.io/seilent/microos/pkg/$1
-    api=/user/packages/container/microos%2Fpkg%2F$1
+    repo=ghcr.io/seilent/microos-y700/pkg/$1
+    api=/user/packages/container/microos-y700%2Fpkg%2F$1
     keys=${MICROOS_KEYS:-$HOME/.config/microos/keys}
     cosign=${COSIGN:-cosign}
     podman login --get-login ghcr.io >/dev/null
     if ! gh api "$api" >/dev/null 2>&1; then
       start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      gh workflow run package-init.yml -R seilent/MicroOS -f name="$1"
+      gh workflow run package-init.yml -R seilent/microos-y700 -f name="$1"
       run=
       for _ in $(seq 60); do
         sleep 5
-        run=$(gh run list -R seilent/MicroOS --workflow package-init.yml --event workflow_dispatch \
+        run=$(gh run list -R seilent/microos-y700 --workflow package-init.yml --event workflow_dispatch \
           --user seilent --json databaseId,createdAt \
           --jq "[.[] | select(.createdAt >= \"$start\")][0].databaseId // empty")
         [[ -z $run ]] || break
       done
       [[ -n $run ]] || { echo "package-init run not found" >&2; exit 1; }
-      gh run watch "$run" -R seilent/MicroOS --exit-status >/dev/null
+      gh run watch "$run" -R seilent/microos-y700 --exit-status >/dev/null
     fi
     if err=$(skopeo inspect --raw "docker://$repo:$hash" 2>&1 >/dev/null); then
       echo "$repo:$hash exists" >&2

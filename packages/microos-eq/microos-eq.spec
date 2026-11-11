@@ -5,7 +5,7 @@ Version:        1
 Release:        1%{?dist}.microos
 Summary:        MicroOS EQ LADSPA plugin
 License:        GPL-2.0-or-later AND BSD-3-Clause
-URL:            https://github.com/seilent/MicroOS
+URL:            https://github.com/seilent/microos-y700
 Source0:        %{name}.tar.gz
 Vendor:         MicroOS
 BuildRequires:  gcc
