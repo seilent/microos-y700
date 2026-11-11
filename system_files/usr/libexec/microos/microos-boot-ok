@@ -254,17 +254,6 @@ if [[ -n $id ]]; then
   fi
 fi
 
-if [[ -r $sdamlib ]]; then
-  . "$sdamlib"
-  if sdam_find && sdam_put clear; then
-    say "fastboot preset cleared in ${sdam##*/}"
-  else
-    say "fastboot preset not cleared, no SDAM nvram@7100"
-  fi
-else
-  say "missing $sdamlib, fastboot preset not cleared"
-fi
-
 disarm() {
   python3 - "$devmem" "$membase" "$MICROOS_STUB_STATUS" "$MICROOS_STUB_DISARM" "$MICROOS_STUB_MAGIC" \
     "$MICROOS_STUB_SIGNATURE" "$MICROOS_STUB_ARMED" "$MICROOS_STUB_RUNNING" "$MICROOS_STUB_STOPPED" \
@@ -310,14 +299,15 @@ print("stopped" if st == stopped else "running", st, n)
 EOF
 }
 
+stubdown=0
 if [[ -r $stubconf ]]; then
   . "$stubconf"
   if r=$(disarm 2>&1); then
     read -r res st n <<< "$r"
     case $res in
-      absent) say "no stub, status word $st" ;;
+      absent) say "no stub, status word $st"; stubdown=1 ;;
       refused) say "stub CPU_ON was refused, PSCI $n" ;;
-      stopped) say "stub stopped at $n s" ;;
+      stopped) say "stub stopped at $n s"; stubdown=1 ;;
       *) say "stub still running at $n s after the disarm, it resets at $MICROOS_STUB_DEADLINE s" ;;
     esac
   else
@@ -325,6 +315,21 @@ if [[ -r $stubconf ]]; then
   fi
 else
   say "missing $stubconf, stub not disarmed"
+fi
+
+if (( stubdown )); then
+  if [[ -r $sdamlib ]]; then
+    . "$sdamlib"
+    if sdam_find && sdam_put clear; then
+      say "fastboot preset cleared in ${sdam##*/}"
+    else
+      say "fastboot preset not cleared, no SDAM nvram@7100"
+    fi
+  else
+    say "missing $sdamlib, fastboot preset not cleared"
+  fi
+else
+  say "stub not stopped, fastboot preset kept"
 fi
 
 MICROOS_SLOT_WRITE=0
