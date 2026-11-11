@@ -5,7 +5,7 @@ me=y700-install-images
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 helper=localhost/microos-y700-install
-usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>]"
+usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>] [--dev-sudo]"
 root_part=726392975360
 efi_part=1073741824
 f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota panic" "stub1f slota emergency"
@@ -22,7 +22,7 @@ die() { echo "$me: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
 image="" channel="" vendor="" nonhlos="" btfm="" wifi="" wlanbd="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
-panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 inner=0 owner=""
+panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 devsudo=0 inner=0 owner=""
 specs=("")
 while (( $# )); do
   case $1 in
@@ -33,6 +33,7 @@ while (( $# )); do
     --btfm) btfm=${2:?$usage}; shift 2 ;;
     --wifi) wifi=${2:?$usage}; shift 2 ;;
     --wlan-board) wlanbd=${2:?$usage}; shift 2 ;;
+    --dev-sudo) devsudo=1; shift ;;
     --authorized-keys) keys=${2:?$usage}; shift 2 ;;
     --work) work=${2:?$usage}; shift 2 ;;
     --out) out=${2:?$usage}; shift 2 ;;
@@ -110,6 +111,7 @@ if (( ! inner )); then
   (( bootimg )) || args+=(--no-bootimg)
   [[ -z $wifi ]] || args+=(--wifi "/in/wifi/${wifi##*/}")
   [[ -z $wlanbd ]] || args+=(--wlan-board "$wlanbd")
+  (( ! devsudo )) || args+=(--dev-sudo)
   for s in "${specs[@]:1}"; do
     args+=(--bootimg "$s")
   done
@@ -208,6 +210,10 @@ fstab=$dep/etc/fstab
 ! awk '$1 !~ /^#/ && $2 == "/boot/efi" { f = 1 } END { exit !f }' "$fstab" 2>/dev/null || die "$fstab already mounts /boot/efi"
 printf 'PARTLABEL=microos_efi /boot/efi vfat nofail,x-systemd.device-timeout=10s,umask=0077 0 2\n' >> "$fstab"
 install -d -m 0755 "$T/boot/efi"
+if (( devsudo )); then
+  printf 'micro ALL=(ALL) NOPASSWD: ALL\n' > "$w/sudoers"
+  install -D -m 0440 "$w/sudoers" "$dep/etc/sudoers.d/90-micro-nopasswd"
+fi
 
 log "firmware"
 fw=$var/lib/microos/fw
@@ -349,8 +355,8 @@ img2simg "$efi" "$out/efi.simg"
 chmod 0600 "$out/efi.simg"
 
 cp "$w/fw.sums" "$out/fw.SHA256SUMS"
-printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nWIFI=%q\nWLAN_BOARD=%q\nOPTIONS=%q\n' \
-  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "${wifi##*/}" "$wlanbd" "$options" > "$out/build.env"
+printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nWIFI=%q\nWLAN_BOARD=%q\nDEV_SUDO=%q\nOPTIONS=%q\n' \
+  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "${wifi##*/}" "$wlanbd" "$devsudo" "$options" > "$out/build.env"
 (cd "$out" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$w/sums"
 mv "$w/sums" "$out/SHA256SUMS"
 cat "$out/SHA256SUMS" >&2

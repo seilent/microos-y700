@@ -171,6 +171,13 @@ grep -qxF 'PARTLABEL=microos_efi /boot/efi vfat nofail,x-systemd.device-timeout=
   || fail "no /boot/efi line by PARTLABEL in the deployment's fstab"
 (( $(awk '$1 !~ /^#/ && $2 == "/boot/efi"' "$dep/etc/fstab" | wc -l) == 1 )) || fail "more than one /boot/efi line"
 [[ -d $T/boot/efi ]] || fail "no /boot/efi mount point in the sysroot"
+sudo=$dep/etc/sudoers.d/90-micro-nopasswd
+if [[ ${DEV_SUDO:-0} == 1 ]]; then
+  [[ $(stat -c '%a %U' "$sudo" 2>/dev/null) == '440 root' && $(< "$sudo") == 'micro ALL=(ALL) NOPASSWD: ALL' ]] \
+    || fail "--dev-sudo: $sudo missing or wrong"
+else
+  [[ ! -e $sudo ]] || fail "$sudo without --dev-sudo"
+fi
 
 fw=$T/ostree/deploy/default/var/lib/microos/fw
 dev=$fw/qcom/sm8650/lenovo/tb321fu
