@@ -88,6 +88,7 @@ kept=(
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/modprobe.d/microos-y700-rtc.conf
+  /usr/lib/udev/rules.d/59-microos-y700-input.rules
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf
@@ -275,6 +276,10 @@ ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turn
 [[ $(< /usr/lib/modules-load.d/microos-y700.conf) == pci-pwrctrl-pwrseq ]] || fail "modules-load.d microos-y700.conf"
 [[ $(< /usr/lib/modprobe.d/microos-y700-rtc.conf) == 'blacklist rtc_pm8xxx' ]] || fail "modprobe.d microos-y700-rtc.conf"
 [[ $(readlink /etc/systemd/system-generators/systemd-gpt-auto-generator) == /dev/null ]] || fail "systemd-gpt-auto-generator is not masked"
+rules=/usr/lib/udev/rules.d/59-microos-y700-input.rules
+grep -qxF 'ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"' "$rules" || fail "touch calibration rule"
+grep -qF 'ATTRS{name}=="NVTCapacitivePen", ENV{.HAVE_HWDB_PROPERTIES}="1", ENV{EVDEV_ABS_00}="::135", ENV{EVDEV_ABS_01}="::135"' "$rules" || fail "pen resolution rule"
+udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
   drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/input/touchscreen/nt36523/nt36523_ts \
   drivers/power/supply/qcom_battmgr; do
