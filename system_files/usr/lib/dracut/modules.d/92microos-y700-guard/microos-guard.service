@@ -1,0 +1,16 @@
+[Unit]
+Description=Count the boot attempt on microos_efi
+DefaultDependencies=no
+Wants=dev-disk-by\x2dpartlabel-microos_efi.device
+After=dev-disk-by\x2dpartlabel-microos_efi.device
+Before=initrd-root-device.target
+OnFailure=emergency.target
+OnFailureJobMode=replace-irreversibly
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/microos/microos-guard
+
+[Install]
+WantedBy=initrd.target
