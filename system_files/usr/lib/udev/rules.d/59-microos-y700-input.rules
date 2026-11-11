@@ -1,5 +1,0 @@
-ACTION!="add|change", GOTO="microos_y700_input_end"
-KERNEL!="event*", GOTO="microos_y700_input_end"
-ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"
-ATTRS{name}=="NVTCapacitivePen", ENV{.HAVE_HWDB_PROPERTIES}="1", ENV{EVDEV_ABS_00}="::135", ENV{EVDEV_ABS_01}="::135", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"
-LABEL="microos_y700_input_end"
