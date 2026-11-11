@@ -27,6 +27,7 @@ lenovo,tb321fu -
 lenovo,tb321fu-boe-nt36523 DRM_PANEL_NOVATEK_NT36523
 lenovo,tb321fu-csot-nt36523 DRM_PANEL_NOVATEK_NT36523
 novatek,nt36523 DRM_PANEL_NOVATEK_NT36523
+novatek,nt36523-ts TOUCHSCREEN_NOVATEK_NT36523
 nvmem-reboot-mode NVMEM_REBOOT_MODE
 nxp,ptn3222 PHY_NXP_PTN3222
 operating-points-v2 -
