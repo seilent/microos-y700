@@ -603,6 +603,13 @@ indev input3 2 "660800000000003" "400 0 0 0 0 0"
 indev input4 2 "1000003" "c03 0 0 0 0 0"
 run || fail "kround p1c pass: $(cat "$tmp/out")"
 kept "kround p1c pass"
+kround p2a
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+indev input3 2 "660800000000003" "400 0 0 0 0 0"
+indev input4 2 "1000003" "c03 0 0 0 0 0"
+run || fail "kround p2a pass: $(cat "$tmp/out")"
+kept "kround p2a pass"
+has "kround p2a: checks udc wlan0 dsi touch pen" || fail "kround p2a checks not reported: $(cat "$tmp/out")"
 oncek() {
   kround "$1"
   echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.kround=$1 microos.test=${2:-once}" > "$tmp/proc-cmdline"
