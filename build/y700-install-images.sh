@@ -11,9 +11,9 @@ efi_part=1073741824
 f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota panic" "stub1f slota emergency"
   "stub1f slota noroot noguard" "stub7 1" "stub7 wdhang" "stub1 noroot noguard")
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
-  novatek_ts_csot_fw.bin)
+  novatek_ts_csot_fw.bin aw882xx_acf.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
-root_files=(haptic_ram.bin aw882xx_acf.bin)
+root_files=(haptic_ram.bin)
 nonhlos_globs=("adsp*" "cdsp*" "ipa_fws*")
 vpu_vendor=vpu33_4v.mbn
 vpu_dts=vpu33_p4.mbn
