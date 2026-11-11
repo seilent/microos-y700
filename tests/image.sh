@@ -22,15 +22,23 @@ grep -qx "$(cat /usr/lib/microos/version)" /usr/lib/os-release || fail "version 
 [[ $(readlink /etc/os-release) == ../usr/lib/os-release ]] || fail "/etc/os-release is not the relative symlink"
 
 rpm -q android-tools btrfs-progs dosfstools jq util-linux rsync dnsmasq python3 >/dev/null || fail "base rpms missing"
-for c in mkbootimg unpack_bootimg avbtool skopeo jq flock python3 btrfs mkfs.vfat rsync dnsmasq sshd NetworkManager sudo; do
+rpm -q chrony NetworkManager-wifi wpa_supplicant wireless-regdb atheros-firmware qcom-firmware linux-firmware mesa-dri-drivers \
+  mesa-vulkan-drivers mesa-libgbm mesa-libEGL mesa-libGL vulkan-loader vulkan-tools sddm sddm-wayland-generic steam-devices \
+  dbus-tools gtk2 gtk3 openal-soft sdl2-compat libXcomposite libXdamage libXfixes libXi libXinerama libXrandr libXrender \
+  libXtst libSM libICE at-spi2-atk cups-libs libssh2 libva libvdpau google-noto-sans-cjk-vf-fonts \
+  google-noto-color-emoji-fonts google-noto-sans-arabic-vf-fonts google-noto-sans-hebrew-vf-fonts \
+  google-noto-sans-thai-vf-fonts google-noto-sans-devanagari-vf-fonts google-noto-sans-mono-vf-fonts upower procps-ng \
+  zstd >/dev/null || fail "Steam path rpms missing"
+for c in mkbootimg unpack_bootimg avbtool skopeo jq flock python3 btrfs mkfs.vfat rsync dnsmasq sshd NetworkManager sudo \
+  chronyd wpa_supplicant gamescope gamescope-session-plus vulkaninfo pgrep zstd; do
   command -v "$c" >/dev/null || fail "$c missing"
 done
 grep -qx 'install_weak_deps=False' /etc/dnf/libdnf5.conf.d/10-microos.conf || fail "10-microos.conf does not turn off weak deps"
 [[ -z $(rpm -qa '*-debuginfo' '*-debugsource') ]] || fail "debug rpms installed: $(rpm -qa '*-debuginfo' '*-debugsource' | tr '\n' ' ')"
-own=$(rpm -qa --qf '%{NAME}\t%{VENDOR}\n' | awk -F'\t' '$2 == "MicroOS" && $1 != "microos-kernel" { print $1 }')
-[[ -z $own ]] || fail "MicroOS rpms other than microos-kernel: $(tr '\n' ' ' <<< "$own")"
-for p in qbootctl gamescope gamescope-session inputplumber steamos-manager microset mangohud lsfg-vk hexagonrpc microos-eq \
-  libfreeaptx pipewire-codec-aptx sddm microos-android-guestos microos-steam-seed; do
+own=$(rpm -qa --qf '%{NAME}\t%{VENDOR}\n' | awk -F'\t' '$2 == "MicroOS" { print $1 }' | LC_ALL=C sort | paste -sd' ')
+[[ $own == 'gamescope gamescope-session gamescope-session-steam microos-kernel' ]] || fail "MicroOS rpms: $own"
+for p in qbootctl inputplumber steamos-manager microset mangohud lsfg-vk hexagonrpc microos-eq libfreeaptx \
+  pipewire-codec-aptx microos-android-guestos microos-steam-seed; do
   ! rpm -q "$p" >/dev/null 2>&1 || fail "$p is installed"
 done
 
@@ -64,8 +72,9 @@ for u in "${tests[@]}"; do
   systemctl cat "$u" | grep -qx "ConditionKernelCommandLine=microos.test=${w%.service}" || fail "$u has no microos.test condition"
 done
 [[ $(systemctl is-enabled microos-update-check.timer) == masked ]] || fail "microos-update-check.timer is not masked"
-[[ ! -e /usr/lib/systemd/user-preset/50-microos.preset && -z $(compgen -G '/usr/lib/systemd/user/microos-*') ]] \
-  || fail "MicroOS user units in the image"
+[[ ! -e /usr/lib/systemd/user-preset/50-microos.preset ]] || fail "user 50-microos.preset in the image"
+[[ $(compgen -G '/usr/lib/systemd/user/microos-*') == /usr/lib/systemd/user/microos-steam-seed.service ]] \
+  || fail "MicroOS user units: $(compgen -G '/usr/lib/systemd/user/microos-*' | tr '\n' ' ')"
 [[ $(< /usr/lib/systemd/system-preset/50-microos.preset) == 'enable microos-*' ]] || fail "50-microos.preset"
 
 kept=(
@@ -93,9 +102,12 @@ kept=(
   /usr/lib/microos/slot.conf
   /usr/lib/microos/stub.conf
   /usr/lib/microos/version
+  /usr/lib/modules-load.d/microos-y700.conf
+  /usr/lib/sddm/sddm.conf.d/zz-microos.conf
   /usr/lib/sysctl.d/60-microos-yama.conf
   /usr/lib/systemd/journald.conf.d/10-microos.conf
   /usr/lib/systemd/system-preset/50-microos.preset
+  /usr/lib/systemd/system-preset/60-microos-steam.preset
   /usr/lib/systemd/system/emergency.service.d/10-microos.conf
   /usr/lib/systemd/system/microos-boot-deadline.service
   /usr/lib/systemd/system/microos-boot-deadline.timer
@@ -116,6 +128,8 @@ kept=(
   /usr/lib/systemd/system/microos-usb-console.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
+  /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
+  /usr/lib/systemd/user/microos-steam-seed.service
   /usr/lib/sysusers.d/microos.conf
   /usr/lib/tmpfiles.d/microos.conf
   /usr/lib/udev/rules.d/90-microos-usb-console.rules
@@ -128,6 +142,7 @@ kept=(
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-sdam
   /usr/libexec/microos/microos-slot
+  /usr/libexec/microos/microos-steam-seed
   /usr/libexec/microos/microos-test
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
@@ -136,6 +151,11 @@ kept=(
   /usr/share/microos/keys/microos-backup.pub
   /usr/share/microos/keys/microos-next.pub
   /usr/share/microos/keys/microos.pub
+  /usr/share/licenses/microos-steam-seed/steam_subscriber_agreement.txt
+  /usr/share/microos-seed/steam-seed.tar.zst
+  /usr/share/microos-seed/steam-seed.version
+  /usr/share/polkit-1/rules.d/50-microos-steam.rules
+  /usr/share/polkit-1/rules.d/50-microos-timezone.rules
 )
 for f in "${kept[@]}"; do
   [[ -f $f ]] || fail "$f missing"
@@ -146,11 +166,10 @@ while IFS= read -r f; do
 done < <(find /usr /etc -xdev -path /usr/lib/modules -prune -o -path '*microos*' -type f -print \
   | grep -vxF /etc/dnf/libdnf5.conf.d/10-microos.conf | LC_ALL=C sort)
 extra=$(LC_ALL=C comm -23 <(printf '%s\n' "${ours[@]}") <(printf '%s\n' "${kept[@]}" | LC_ALL=C sort))
-[[ -z $extra ]] || fail "MicroOS files outside the M1 set: $(tr '\n' ' ' <<< "$extra")"
-for f in /usr/bin/steam /usr/bin/steamvr /usr/bin/steamos-update /usr/bin/steamos-select-branch /usr/bin/steamos-session-select \
-  /usr/bin/steamos-mandatory-update /usr/bin/steamos-polkit-helpers /usr/bin/jupiter-biosupdate \
-  /usr/bin/jupiter-initial-firmware-update /usr/lib/hwsupport /usr/lib/android-sdk /usr/share/gamescope-session-plus \
-  /etc/gamescope-session-plus /usr/share/inputplumber /usr/share/steamos-manager; do
+[[ -z $extra ]] || fail "MicroOS files outside the M2 set: $(tr '\n' ' ' <<< "$extra")"
+for f in /usr/bin/steamvr /usr/lib/hwsupport /usr/lib/android-sdk /usr/share/inputplumber /usr/share/steamos-manager \
+  /usr/share/gamescope-session-plus/sessions.d/recovery /usr/libexec/microos/microos-steam-compat \
+  /usr/libexec/microos/microos-session-watch /usr/bin/microos-session /usr/share/plymouth/themes/microos; do
   [[ ! -e $f ]] || fail "$f is in the image"
 done
 ucm=$(compgen -G '/usr/share/alsa/ucm2/*/sm8250/PocketMICRO2*' || true)
@@ -189,10 +208,83 @@ for f in microos-slot microos-usb-console; do
 done
 [[ $(< /usr/lib/udev/rules.d/90-microos-usb-console.rules) == \
   'SUBSYSTEM=="tty", KERNEL=="ttyGS0", ENV{SYSTEMD_WANTS}+="serial-getty@ttyGS0.service"' ]] || fail "90-microos-usb-console.rules"
-[[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -' ]] \
+[[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -\nd /var/cache/libX11 0755 root root -\nd /var/cache/libX11/compose 0755 root root -' ]] \
   || fail "tmpfiles microos.conf"
 dtb=/usr/lib/modules/$kver/dtb/$(sed -n 's/^MICROOS_DTB=//p' /usr/lib/microos/bootimg.conf)
 [[ $(od -An -tx1 -N4 "$dtb" | tr -d ' \n') == d00dfeed ]] || fail "MICROOS_DTB $dtb is not a DTB"
+
+[[ $(< /usr/lib/sddm/sddm.conf.d/zz-microos.conf) == $'[General]\nDisplayServer=wayland\n\n[Autologin]\nUser=micro\nRelogin=true\nSession=gamescope-session-steam.desktop' ]] \
+  || fail "sddm zz-microos.conf is not the micro autologin into gamescope-session-steam"
+[[ $(readlink /etc/systemd/system/display-manager.service) == */sddm.service ]] || fail "display-manager.service is not sddm"
+[[ $(systemctl get-default) == graphical.target ]] || fail "default target is $(systemctl get-default)"
+grep -qx 'Exec=gamescope-session-plus steam' /usr/share/wayland-sessions/gamescope-session-steam.desktop \
+  || fail "gamescope-session-steam.desktop does not start gamescope-session-plus steam"
+for u in sddm.service upower.service chronyd.service NetworkManager.service; do
+  [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
+done
+y700='if [[ ":Lenovo Legion Y700 (2025) / TB321FU:" =~ ":$SYS_ID:" ]]; then'
+quirk=$(grep -A4 -xF "$y700" /usr/share/gamescope-session-plus/device-quirks || true)
+[[ $quirk == "$y700"$'\n'"  OUTPUT_CONNECTOR='*,DSI-1'"$'\n  ORIENTATION=right\n  GAMESCOPE_STARTUP_TIMEOUT=30\nfi' ]] \
+  || fail "device-quirks Y700 entry: $quirk"
+python3 - "$dtb" <<'PY' || fail "MICROOS_DTB has no model the quirk matches"
+import sys
+sys.exit(b"Lenovo Legion Y700 (2025) / TB321FU\0" not in open(sys.argv[1], "rb").read())
+PY
+[[ $(< /etc/gamescope-session-plus/sessions.d/steam) == $'short_session_recover() {\n  echo "microos: short Steam session, recovery is off" >&2\n}' ]] \
+  || fail "/etc/gamescope-session-plus/sessions.d/steam"
+for h in steamos-update steamos-select-branch jupiter-biosupdate steamos-set-timezone; do
+  [[ -x /usr/bin/steamos-polkit-helpers/$h ]] || fail "steamos-polkit-helpers/$h missing"
+done
+for h in steam steamos-update steamos-select-branch steamos-session-select steamos-mandatory-update jupiter-biosupdate \
+  jupiter-initial-firmware-update; do
+  [[ -x /usr/bin/$h && $(rpm -qf "/usr/bin/$h" 2>/dev/null) != *gamescope-session-steam* ]] || fail "/usr/bin/$h missing or from gamescope-session-steam"
+done
+steamrules=/usr/share/polkit-1/rules.d/50-microos-steam.rules
+for a in inhibit-handle-power-key inhibit-handle-suspend-key suspend reboot power-off; do
+  grep -qF "\"org.freedesktop.login1.$a\"" "$steamrules" || fail "$steamrules lacks org.freedesktop.login1.$a"
+done
+[[ $(< /usr/lib/systemd/system-preset/60-microos-steam.preset) == 'enable upower.service' ]] || fail "60-microos-steam.preset"
+
+seedrpm=(/seed-rpm/microos-steam-seed-*.aarch64.rpm)
+[[ ${#seedrpm[@]} -eq 1 && -f ${seedrpm[0]} ]] || fail "expected one microos-steam-seed RPM in /seed-rpm"
+[[ $(rpm -qp --qf '%{FILEDIGESTALGO}' "${seedrpm[0]}") == 8 ]] || fail "seed RPM file digests are not sha256"
+seedfiles=$(rpm -qp --qf '[%{FILENAMES}|%{FILEDIGESTS}|%{FILEMODES:octal}\n]' "${seedrpm[0]}") || fail "rpm -qp of the seed RPM"
+grep -q '^/usr/share/microos-seed/steam-seed.tar.zst|' <<< "$seedfiles" || fail "seed RPM file list: $seedfiles"
+while IFS='|' read -r path digest mode; do
+  if [[ $mode == 100* ]]; then
+    [[ $(sha256sum < "$path" | cut -d' ' -f1) == "$digest" ]] || fail "$path differs from the seed RPM"
+    [[ $(stat -c '%a' "$path") == "${mode: -3}" ]] || fail "$path mode differs from the seed RPM"
+  else
+    [[ -d $path ]] || fail "$path missing"
+  fi
+done <<< "$seedfiles"
+[[ $(find /usr/share/microos-seed -mindepth 1 | sort) == "$(rpm -qlp "${seedrpm[0]}" | grep '^/usr/share/microos-seed/' | sort)" ]] \
+  || fail "/usr/share/microos-seed holds files outside the seed RPM"
+
+ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turnip (freedreno) Vulkan ICD"
+[[ $(< /usr/lib/modules-load.d/microos-y700.conf) == pci-pwrctrl-pwrseq ]] || fail "modules-load.d microos-y700.conf"
+for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
+  drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/input/touchscreen/nt36523/nt36523_ts \
+  drivers/power/supply/qcom_battmgr; do
+  compgen -G "/usr/lib/modules/$kver/kernel/$m.ko*" >/dev/null || fail "module $m missing"
+done
+alias=/usr/lib/modules/$kver/modules.alias
+grep -qx 'alias of:N\*T\*Cpci17cb,1107 pci_pwrctrl_pwrseq' "$alias" || fail "no WCN7850 alias for pci_pwrctrl_pwrseq"
+grep -qx 'alias of:N\*T\*Clenovo,tb321fu-nt36523n-spi nt36523_ts' "$alias" || fail "no TB321FU touch alias for nt36523_ts"
+for f in amss m3 board-2; do
+  compgen -G "/usr/lib/firmware/ath12k/WCN7850/hw2.0/$f.bin*" >/dev/null || fail "ath12k WCN7850 $f.bin missing"
+done
+dtbs=$(tr -d '\0' < "$dtb")
+for f in gen70900_zap.mbn novatek_ts_boe_fw.bin vpu33_p4.mbn adsp.mdt cdsp.mdt; do
+  [[ $dtbs == *"qcom/sm8650/lenovo/tb321fu/$f"* ]] || fail "MICROOS_DTB does not ask for qcom/sm8650/lenovo/tb321fu/$f"
+done
+for f in gen70900_sqe.fw gmu_gen70900.bin; do
+  compgen -G "/usr/lib/firmware/qcom/$f*" >/dev/null || fail "Fedora qcom/$f missing"
+done
+blobs=$(find /usr /etc /var -xdev \( -path '*/qcom/sm8650/lenovo*' -o -name wlan_mac.bin -o -name 'novatek_ts_*' \
+  -o -name 'bdwlan*' \) -print 2>/dev/null || true)
+[[ -z $blobs ]] || fail "device firmware in the image: $(tr '\n' ' ' <<< "$blobs")"
+[[ ! -e /var/lib/microos/fw ]] || fail "/var/lib/microos/fw is in the image, install time only"
 
 execs() {
   systemctl cat "$1" | awk -v k="$2=" 'index($0, k) == 1 { v = substr($0, length(k) + 1); if (v == "") n = 0; else l[++n] = v }
