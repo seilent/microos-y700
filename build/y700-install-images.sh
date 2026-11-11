@@ -5,7 +5,7 @@ me=y700-install-images
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 helper=localhost/microos-y700-install
-usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>] [--dev-sudo]"
+usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>] [--dev-sudo] [--tplg <Lenovo-Y700-TB321FU-tplg.bin>]"
 root_part=726392975360
 efi_part=1073741824
 f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota panic" "stub1f slota emergency"
@@ -13,7 +13,7 @@ f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
-root_files=(haptic_ram.bin)
+root_files=(haptic_ram.bin aw882xx_acf.bin)
 nonhlos_globs=("adsp*" "cdsp*" "ipa_fws*")
 vpu_vendor=vpu33_4v.mbn
 vpu_dts=vpu33_p4.mbn
@@ -22,7 +22,7 @@ bt_files=(hmtbtfw20.tlv hmtnv20_Kirby_row.bin)
 die() { echo "$me: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
-image="" channel="" vendor="" nonhlos="" btfm="" wifi="" wlanbd="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
+image="" channel="" vendor="" nonhlos="" btfm="" wifi="" wlanbd="" tplg="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
 panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 devsudo=0 inner=0 owner=""
 specs=("")
 while (( $# )); do
@@ -35,6 +35,7 @@ while (( $# )); do
     --wifi) wifi=${2:?$usage}; shift 2 ;;
     --wlan-board) wlanbd=${2:?$usage}; shift 2 ;;
     --dev-sudo) devsudo=1; shift ;;
+    --tplg) tplg=${2:?$usage}; shift 2 ;;
     --authorized-keys) keys=${2:?$usage}; shift 2 ;;
     --work) work=${2:?$usage}; shift 2 ;;
     --out) out=${2:?$usage}; shift 2 ;;
@@ -113,6 +114,7 @@ if (( ! inner )); then
   [[ -z $wifi ]] || args+=(--wifi "/in/wifi/${wifi##*/}")
   [[ -z $wlanbd ]] || args+=(--wlan-board "$wlanbd")
   (( ! devsudo )) || args+=(--dev-sudo)
+  [[ -z $tplg ]] || { args+=(--tplg /in/tplg.bin); wifimount+=(-v "$(realpath "$tplg"):/in/tplg.bin:ro"); }
   for s in "${specs[@]:1}"; do
     args+=(--bootimg "$s")
   done
@@ -230,6 +232,7 @@ done
 for f in "${root_files[@]}"; do
   install -D -m 0644 "$w/fw/firmware/$f" "$fw/$f"
 done
+[[ -z $tplg ]] || install -D -m 0644 "$tplg" "$fw/qcom/sm8650/Lenovo-Y700-TB321FU-tplg.bin"
 mcopy -n -i "$nonhlos" "${nonhlos_globs[@]/#/::/image/}" "$w/fw/nh/"
 for f in "$w"/fw/nh/*; do
   install -m 0644 "$f" "$dev/${f##*/}"
@@ -359,8 +362,8 @@ img2simg "$efi" "$out/efi.simg"
 chmod 0600 "$out/efi.simg"
 
 cp "$w/fw.sums" "$out/fw.SHA256SUMS"
-printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nWIFI=%q\nWLAN_BOARD=%q\nDEV_SUDO=%q\nOPTIONS=%q\n' \
-  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "${wifi##*/}" "$wlanbd" "$devsudo" "$options" > "$out/build.env"
+printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nWIFI=%q\nWLAN_BOARD=%q\nDEV_SUDO=%q\nTPLG=%q\nOPTIONS=%q\n' \
+  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "${wifi##*/}" "$wlanbd" "$devsudo" "$( [[ -n $tplg ]] && echo 1 )" "$options" > "$out/build.env"
 (cd "$out" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$w/sums"
 mv "$w/sums" "$out/SHA256SUMS"
 cat "$out/SHA256SUMS" >&2

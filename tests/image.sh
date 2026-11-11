@@ -189,6 +189,10 @@ for f in /usr/bin/steamvr /usr/lib/hwsupport /usr/lib/android-sdk /usr/share/inp
   [[ ! -e $f ]] || fail "$f is in the image"
 done
 ucm=$(compgen -G '/usr/share/alsa/ucm2/*/sm8250/PocketMICRO2*' || true)
+grep -qxF '	File "/Qualcomm/sm8650/TB321FU/HiFi.conf"' /usr/share/alsa/ucm2/conf.d/sm8650/Lenovo-Y700-TB321FU.conf \
+  || fail "TB321FU UCM card file"
+grep -qF "cset \"name='SEC_TDM_RX_0 Audio Mixer MultiMedia2' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
+  || fail "TB321FU UCM speaker route"
 [[ -z $ucm ]] || fail "PM2 UCM files in the image: $ucm"
 ! grep -qs '^micro:' /etc/subuid /etc/subgid || fail "micro has subordinate ids"
 words=$(grep -lIiE 'PocketMICRO2|sm8250|ayaneo|aya-keys|fastrpc-sdsp|mmcblk' "${ours[@]}" || true)

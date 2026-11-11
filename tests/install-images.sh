@@ -10,7 +10,7 @@ efi_part=1073741824
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
-root_files=(haptic_ram.bin)
+root_files=(haptic_ram.bin aw882xx_acf.bin)
 bt_files=(hmtbtfw20.tlv hmtnv20_Kirby_row.bin)
 
 rc=0
@@ -208,6 +208,7 @@ for f in "${root_files[@]}"; do
   cmp -s "$w/fw/firmware/$f" "$fw/$f" || fail "$fw/$f differs from the vendor copy"
   expect+=("$f")
 done
+[[ -z ${TPLG:-} ]] || expect+=(qcom/sm8650/Lenovo-Y700-TB321FU-tplg.bin)
 nnh=0
 for f in "$w"/fw/nh/*; do
   cmp -s "$f" "$dev/${f##*/}" || fail "$dev/${f##*/} differs from NON-HLOS.bin"
