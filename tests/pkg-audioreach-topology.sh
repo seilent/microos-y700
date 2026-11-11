@@ -157,7 +157,7 @@ if len(tdm) != 1:
 else:
     t = tdm[0]
     kv = ours['mods'].get(t, {})
-    want = {200: 0x0700100E, 1: 40, 251: 0, 250: 1, 253: 1, 265: 8, 266: 32}
+    want = {200: 0x0700100E, 1: 40, 251: 0, 250: 1, 253: 1, 262: 1, 263: 1, 265: 8, 266: 32, 267: 0, 268: 0, 269: 0}
     got = {k: kv.get(k) for k in want}
     if got != want:
         fail(f"{t} tokens {got}, want {want}")
@@ -179,7 +179,9 @@ ucm = os.path.join(w, 'ucm.conf')
 if os.path.exists(ucm):
     text = open(ucm).read()
     ns = tuple(n + ' ' for n in ours['mixers'])
-    used = [n for n in re.findall(r"cset \"name='([^']+)'", text) if n.startswith(ns) or n.endswith(' Playback Volume')]
+    codec = ('SpkrLeft ', 'SpkrRight ')
+    used = [n for n in re.findall(r"cset \"name='([^']+)'", text)
+            if not n.startswith(codec) and (n.startswith(ns) or n.endswith(' Playback Volume'))]
     if not used:
         fail("UCM sets no topology control")
     for n in used:

@@ -1,4 +1,4 @@
-From 4a30a171a2ed6165382f1af202fef0639fa44665 Mon Sep 17 00:00:00 2001
+From 7dec49eba58f63683915c8d4a12c95d8e6843317 Mon Sep 17 00:00:00 2001
 From: seilent <github@seilent.net>
 Date: Wed, 11 Nov 2026 23:57:48 +0900
 Subject: [PATCH 2/2] audioreach: add tplg for Lenovo Legion Y700 (2025)
@@ -10,8 +10,8 @@ TX_CODEC_DMA_TX_3, with MultiMedia1 to MultiMedia4 as in SM8650-QRD.
 Signed-off-by: seilent <github@seilent.net>
 ---
  CMakeLists.txt           |  1 +
- SM8650-LENOVO-TB321FU.m4 | 48 ++++++++++++++++++++++++++++++++++++++++
- 2 files changed, 49 insertions(+)
+ SM8650-LENOVO-TB321FU.m4 | 50 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 51 insertions(+)
  create mode 100644 SM8650-LENOVO-TB321FU.m4
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
@@ -28,10 +28,10 @@ index b657fda..5c24f39 100644
  	"X1E80100-CRD\;X1E80100-CRD\;qcom/x1e80100\;"
 diff --git a/SM8650-LENOVO-TB321FU.m4 b/SM8650-LENOVO-TB321FU.m4
 new file mode 100644
-index 0000000..53cc28f
+index 0000000..5902926
 --- /dev/null
 +++ b/SM8650-LENOVO-TB321FU.m4
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,50 @@
 +# SPDX-License-Identifier: BSD-3-Clause
 +# Copyright, seilent, 2026
 +include(`audioreach/audioreach.m4')
@@ -56,7 +56,9 @@ index 0000000..53cc28f
 +DEVICE_TDM_SG_ADD(audioreach/subgraph-device-tdm-playback.m4, `Secondary TDM0', SECONDARY_TDM_RX_0,
 +	`S24_LE', 48000, 48000, 2, 2,
 +	LPAIF_INTF_TYPE_LPAIF, TDM_INTF_TYPE_SECONDARY, 0, DATA_FORMAT_FIXED_POINT,
-+	0x00004006, 0x00004012, 0x00006050, `SEC_TDM_RX_0', 8, 32)
++	0x00004006, 0x00004012, 0x00006050, `SEC_TDM_RX_0', 8, 32,
++	TDM_SYNC_SRC_INTERNAL, TDM_DATA_OUT_ENABLE, TDM_SYNC_MODE_SHORT, TDM_SYNC_PULSE_NORMAL,
++	TDM_DATA_DELAY_0_CYCLE)
 +DEVICE_SG_ADD(audioreach/subgraph-device-codec-dma-playback.m4, `RX_CODEC_DMA_RX_0', RX_CODEC_DMA_RX_0,
 +	`S16_LE', 48000, 48000, 2, 2,
 +	LPAIF_INTF_TYPE_RXTX, CODEC_INTF_IDX_RX0, 0, DATA_FORMAT_FIXED_POINT,
