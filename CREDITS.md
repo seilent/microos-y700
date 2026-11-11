@@ -24,6 +24,22 @@ origins in `packages/kernel/PATCHES.md`.
 | Sitronix ST7123 driver, base of the ST7123 driver | [raspberrypi/linux](https://github.com/raspberrypi/linux) `6d4adb6bfea6` | Waveshare, Sitronix | GPL-2.0 |
 | Rumble report format in `hid-ayaneo` | stock Android 4.19.157 `hid-ayaneo` | AYANEO | GPL-2.0 |
 
+## Session
+
+| What | Origin | Author | License |
+|---|---|---|---|
+| `gamescope-session` | [OpenGamingCollective/gamescope-session](https://github.com/OpenGamingCollective/gamescope-session) `08e65a62ed` | Joaquín Ignacio Aramendía, ChimeraOS and Open Gaming Collective contributors | MIT |
+| `gamescope-session-steam` | [OpenGamingCollective/gamescope-session-steam](https://github.com/OpenGamingCollective/gamescope-session-steam) `82c45fc112` | ChimeraOS and Open Gaming Collective contributors | MIT |
+| `gamescope` | [OpenGamingCollective/gamescope](https://github.com/OpenGamingCollective/gamescope) `3.16.31-ogc2` `76a1563a83` | Valve (Joshua Ashton and gamescope contributors), Open Gaming Collective contributors | BSD-2-Clause, BSD-3-Clause |
+| `gamescope` RPM spec and packaging patches | Fedora [rpms/gamescope](https://src.fedoraproject.org/rpms/gamescope) `a846be4c` | František Zatloukal, Neal Gompa and Fedora packagers | MIT |
+| `gamescope` one step vblank catch up | OGC `72ad630c018e`, first in `3b3cced787e3` | Matthew Schwartz | BSD-2-Clause |
+| Steam client and Steam Runtime (steamrt3c arm64) | Valve `steam_client_steamdeck_stable_linuxarm64` `1788652215`, `steam-runtime-steamrt-arm64` `3c.0.20260729.253765` | Valve Corporation | Steam Subscriber Agreement |
+
+`gamescope-session` carries my Y700 `device-quirks` entry and my startup timeout patch, `gamescope` carries Fedora's
+packaging patches, six of mine and an OGC patch backported by me (`0003` to `0009`, `0006` from OGC) (`PATCHES.md`
+in each package); `gamescope-session-steam` is built as is. License texts in `packages/gamescope/` and
+`packages/gamescope-session/`.
+
 ## Base
 
 | What | Origin | Author | License |
