@@ -72,7 +72,7 @@ EOF
 }
 same() { [[ $(sha256sum < "$1") == $(sha256sum < "$2") ]]; }
 run() {
-  env MICROOS_SLOT_DISKS="${DISKS:-boot_a=$img boot_b=$img}" MICROOS_SLOT_BLOCK_SIZE="${BS:-$ss}" \
+  env MICROOS_SLOT_TEST=1 MICROOS_SLOT_DISKS="${DISKS:-boot_a=$img boot_b=$img}" MICROOS_SLOT_BLOCK_SIZE="${BS:-$ss}" \
     MICROOS_SLOT_CONF="$conf" "$slot" "$@" > "$tmp/out" 2> "$tmp/err"
 }
 writes() { printf 'MICROOS_SLOT_WRITE=%s\nMICROOS_BOOT_TRIES=3\n' "$1" > "$conf"; }
@@ -213,7 +213,7 @@ for c in "mark-good 08 08 4f 4f" "set a 0f 0f 08 08" "set b 08 08 0f 0f"; do
 done
 
 r=0
-env -u MICROOS_SLOT_DISKS MICROOS_SLOT_CONF="$conf" "$slot" status > /dev/null 2> "$tmp/err" || r=$?
+env MICROOS_SLOT_DISKS="boot_a=$img boot_b=$img" MICROOS_SLOT_BLOCK_SIZE="$ss" MICROOS_SLOT_CONF="$conf" "$slot" status > /dev/null 2> "$tmp/err" || r=$?
 err=$(cat "$tmp/err")
 [[ $r == 1 && ($err == *"needs root"* || $err == *"no boot_b partition"*) ]] || fail "status without the hook: exit $r: $err"
 

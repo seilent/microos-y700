@@ -19,10 +19,11 @@ LAYOUT = {
 ME = "microos-slot"
 PARTLABEL = "/dev/disk/by-partlabel"
 SYSBLOCK = "/sys/class/block"
-CONF = os.environ.get("MICROOS_SLOT_CONF", "/usr/lib/microos/slot.conf")
-DISKS = os.environ.get("MICROOS_SLOT_DISKS", "")
-BLOCK = os.environ.get("MICROOS_SLOT_BLOCK_SIZE", "")
-FAIL = os.environ.get("MICROOS_SLOT_FAIL", "")
+TEST = os.environ.get("MICROOS_SLOT_TEST") == "1"
+CONF = os.environ.get("MICROOS_SLOT_CONF", "/usr/lib/microos/slot.conf") if TEST else "/usr/lib/microos/slot.conf"
+DISKS = os.environ.get("MICROOS_SLOT_DISKS", "") if TEST else ""
+BLOCK = os.environ.get("MICROOS_SLOT_BLOCK_SIZE", "") if TEST else ""
+FAIL = os.environ.get("MICROOS_SLOT_FAIL", "") if TEST else ""
 
 
 class Refuse(Exception):
