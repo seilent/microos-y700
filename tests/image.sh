@@ -55,7 +55,7 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
-  "${tests[@]}")
+  microos-remoteproc.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -63,7 +63,7 @@ done
 got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
-  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service "${tests[@]}"; do
+  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
 [[ -L /etc/systemd/system/multi-user.target.wants/microos-bootlog-efi.path ]] || fail "microos-bootlog-efi.path is not wanted by multi-user.target"
@@ -139,6 +139,7 @@ kept=(
   /usr/lib/systemd/system/microos-update.service
   /usr/lib/systemd/system/microos-usb-console.service
   /usr/lib/systemd/system/microos-vpad.service
+  /usr/lib/systemd/system/microos-remoteproc.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
@@ -160,6 +161,7 @@ kept=(
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
   /usr/libexec/microos/microos-vpad
+  /usr/libexec/microos/microos-remoteproc
   /usr/libexec/microos/prepare-root
   /usr/share/microos/avb/testkey_rsa4096.pem
   /usr/share/microos/keys/microos-backup.pub
@@ -217,7 +219,7 @@ kargs = [
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad; do
+for f in microos-slot microos-usb-console microos-vpad microos-remoteproc; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad
