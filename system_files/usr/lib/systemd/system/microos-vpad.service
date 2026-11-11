@@ -1,0 +1,28 @@
+[Unit]
+Description=Virtual gamepad for Steam game mode
+Before=display-manager.service
+
+[Service]
+Type=exec
+ExecStart=/usr/libexec/microos/microos-vpad
+Restart=on-failure
+RestartSec=2
+DeviceAllow=/dev/uinput rw
+DevicePolicy=closed
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=none
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

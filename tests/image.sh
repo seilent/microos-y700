@@ -54,7 +54,8 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
   microos-test-wdhang.service)
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
-  microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service "${tests[@]}")
+  microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
+  "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -62,7 +63,7 @@ done
 got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
-  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service "${tests[@]}"; do
+  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
 [[ -L /etc/systemd/system/multi-user.target.wants/microos-bootlog-efi.path ]] || fail "microos-bootlog-efi.path is not wanted by multi-user.target"
@@ -127,6 +128,7 @@ kept=(
   /usr/lib/systemd/system/microos-test-wdhang.service
   /usr/lib/systemd/system/microos-update.service
   /usr/lib/systemd/system/microos-usb-console.service
+  /usr/lib/systemd/system/microos-vpad.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
@@ -147,6 +149,7 @@ kept=(
   /usr/libexec/microos/microos-test
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
+  /usr/libexec/microos/microos-vpad
   /usr/libexec/microos/prepare-root
   /usr/share/microos/avb/testkey_rsa4096.pem
   /usr/share/microos/keys/microos-backup.pub
@@ -204,9 +207,15 @@ kargs = [
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console; do
+for f in microos-slot microos-usb-console microos-vpad; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
+python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
+  /usr/libexec/microos/microos-vpad "$tmp/vpad.pyc" || fail "microos-vpad does not compile"
+ioc() { echo $(( ($1 << 30) | ($3 << 16) | (0x55 << 8) | $2 )); }
+[[ $(MICROOS_VPAD_DRYRUN=1 /usr/libexec/microos/microos-vpad) == "1116 $(ioc 1 100 4) $(ioc 1 101 4) $(ioc 1 103 4) $(ioc 0 1 0)" ]] \
+  || fail "microos-vpad record or ioctl numbers"
+grep -qx 'DeviceAllow=/dev/uinput rw' /usr/lib/systemd/system/microos-vpad.service || fail "microos-vpad.service DeviceAllow"
 [[ $(< /usr/lib/udev/rules.d/90-microos-usb-console.rules) == \
   'SUBSYSTEM=="tty", KERNEL=="ttyGS0", ENV{SYSTEMD_WANTS}+="serial-getty@ttyGS0.service"' ]] || fail "90-microos-usb-console.rules"
 [[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -\nd /var/cache/libX11 0755 root root -\nd /var/cache/libX11/compose 0755 root root -' ]] \

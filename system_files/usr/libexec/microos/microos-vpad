@@ -1,0 +1,57 @@
+#!/usr/bin/python3
+import fcntl
+import os
+import signal
+import struct
+import sys
+import time
+
+
+def ioc(direction, nr, size):
+    return (direction << 30) | (size << 16) | (0x55 << 8) | nr
+
+
+UI_SET_EVBIT = ioc(1, 100, 4)
+UI_SET_KEYBIT = ioc(1, 101, 4)
+UI_SET_ABSBIT = ioc(1, 103, 4)
+UI_DEV_CREATE = ioc(0, 1, 0)
+EV_KEY = 1
+EV_ABS = 3
+KEYS = (0x130, 0x131, 0x133, 0x134, 0x136, 0x137, 0x13A, 0x13B, 0x13C, 0x13D, 0x13E)
+AXES = {0x00: (-32768, 32767), 0x01: (-32768, 32767), 0x03: (-32768, 32767), 0x04: (-32768, 32767),
+        0x02: (0, 255), 0x05: (0, 255), 0x10: (-1, 1), 0x11: (-1, 1)}
+
+
+def record():
+    absmin = [0] * 64
+    absmax = [0] * 64
+    for axis, (lo, hi) in AXES.items():
+        absmin[axis], absmax[axis] = lo, hi
+    head = b"Microsoft X-Box 360 pad".ljust(80, b"\0") + struct.pack("<HHHHI", 3, 0x045E, 0x028E, 0x114, 0)
+    return head + struct.pack("<64i", *absmax) + struct.pack("<64i", *absmin) + bytes(4 * 64 * 2)
+
+
+def main():
+    rec = record()
+    if os.environ.get("MICROOS_VPAD_DRYRUN") == "1":
+        print(len(rec), UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT, UI_DEV_CREATE)
+        return 0
+    try:
+        fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+    except OSError as err:
+        print(f"microos-vpad: /dev/uinput: {err.strerror}", file=sys.stderr)
+        return 1
+    fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
+    fcntl.ioctl(fd, UI_SET_EVBIT, EV_ABS)
+    for key in KEYS:
+        fcntl.ioctl(fd, UI_SET_KEYBIT, key)
+    for axis in AXES:
+        fcntl.ioctl(fd, UI_SET_ABSBIT, axis)
+    os.write(fd, rec)
+    fcntl.ioctl(fd, UI_DEV_CREATE)
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+    while True:
+        time.sleep(3600)
+
+
+sys.exit(main())
