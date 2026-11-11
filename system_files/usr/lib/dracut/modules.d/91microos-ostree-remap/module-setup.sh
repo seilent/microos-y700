@@ -9,7 +9,7 @@ depends() {
 }
 
 install() {
-    inst_multiple sh realpath mkdir
+    inst_multiple sh realpath mkdir readlink ln mv mount
     inst_simple /usr/libexec/microos/prepare-root
     inst_simple "$moddir/prepare-root.conf" \
         "$systemdsystemunitdir/ostree-prepare-root.service.d/10-microos-remap.conf"

@@ -482,6 +482,24 @@ expect_remap() {
 good=/ostree/boot.1/default/$ca/0
 remap "$ipath" "ostree=$good $base microos.deploy=$a"
 expect_unchanged match
+[[ ! -e $s/ostree/root.a && ! -e $s/ostree/root.b ]] || fail "no androidboot: aboot links written"
+
+abl="androidboot.serialno=x androidboot.dtbo_idx=0"
+remap "$ipath" "ostree=$good $base microos.deploy=$a $abl"
+expect_unchanged "androidboot match"
+for x in a b; do
+  [[ $(readlink "$s/ostree/root.$x") == "deploy/default/deploy/$a" ]] || fail "androidboot match: root.$x is $(readlink "$s/ostree/root.$x")"
+done
+remap "$ipath" "ostree=/ostree/boot.1/default/$cb/1 $base microos.deploy=$a $abl"
+expect_remap "androidboot remap" "ostree=$good $base microos.deploy=$a $abl" "/ostree/boot.1/default/$cb/1" "$good"
+[[ $(readlink "$s/ostree/root.a") == "deploy/default/deploy/$a" ]] || fail "androidboot remap: root.a is $(readlink "$s/ostree/root.a")"
+remap "$ipath" "ostree=/ostree/boot.1/default/$cb/1 $base $abl"
+expect_unchanged "androidboot other deployment"
+for x in a b; do
+  [[ $(readlink "$s/ostree/root.$x") == "deploy/default/deploy/$b" ]] || fail "androidboot other: root.$x is $(readlink "$s/ostree/root.$x")"
+done
+[[ ! -e $s/ostree/root.a.tmp && ! -e $s/ostree/root.b.tmp ]] || fail "androidboot: tmp link left"
+rm -f "$s/ostree/root.a" "$s/ostree/root.b"
 
 remap "$ipath" "ostree=$good $base"
 expect_unchanged "no microos.deploy"
