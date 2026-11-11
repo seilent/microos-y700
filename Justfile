@@ -125,21 +125,36 @@ pkg-push name:
       [[ -n $run ]] || { echo "package-init run not found" >&2; exit 1; }
       gh run watch "$run" -R seilent/microos-y700 --exit-status >/dev/null
     fi
+    pub=system_files/usr/share/microos/keys/microos.pub
     if err=$(skopeo inspect --raw "docker://$repo:$hash" 2>&1 >/dev/null); then
-      echo "$repo:$hash exists" >&2
-      exit 1
-    fi
-    if ! grep -qiE 'manifest unknown|404' <<< "$err"; then
+      cfg=$(skopeo inspect --config --raw "docker://$repo:$hash" | sha256sum | cut -d' ' -f1)
+      if [[ $cfg != "$(podman image inspect -f '{{{{.Id}}' "$local")" ]]; then
+        echo "$repo:$hash exists with another image than $local" >&2
+        exit 1
+      fi
+      digest=sha256:$(skopeo inspect --raw "docker://$repo:$hash" | sha256sum | cut -d' ' -f1)
+      if err=$("$cosign" verify --key "$pub" "$repo@$digest" 2>&1 >/dev/null); then
+        echo "$repo:$hash exists and is signed"
+        exit 0
+      fi
+      if ! grep -qiE 'no signatures found|no matching signatures' <<< "$err"; then
+        echo "$err" >&2
+        exit 1
+      fi
+      echo "$repo:$hash exists unsigned, signing $digest" >&2
+    elif grep -qiE 'manifest unknown|404' <<< "$err"; then
+      podman tag "$local" "$repo:$hash"
+      f=$(mktemp)
+      trap 'rm -f "$f"' EXIT
+      podman push --digestfile "$f" "$repo:$hash"
+      digest=$(cat "$f")
+    else
       echo "$err" >&2
       exit 1
     fi
-    podman tag "$local" "$repo:$hash"
-    digest=$(mktemp)
-    trap 'rm -f "$digest"' EXIT
-    podman push --digestfile "$digest" "$repo:$hash"
     COSIGN_PASSWORD=$(cat "$keys/microos.password") \
-      "$cosign" sign -y --new-bundle-format=false --key "$keys/microos.key" "$repo@$(cat "$digest")"
-    "$cosign" verify --key system_files/usr/share/microos/keys/microos.pub "$repo@$(cat "$digest")" >/dev/null
+      "$cosign" sign -y --new-bundle-format=false --key "$keys/microos.key" "$repo@$digest"
+    "$cosign" verify --key "$pub" "$repo@$digest" >/dev/null
     init=$(gh api "$api/versions" --jq '.[] | select(.metadata.container.tags | index("init")) | .id')
     if [[ -n $init ]]; then
       gh api -X DELETE "$api/versions/$init"
