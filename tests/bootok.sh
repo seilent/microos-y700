@@ -6,9 +6,6 @@ tree=${MICROOS_TREE:-$here/../system_files}
 bootok=$tree/usr/libexec/microos/microos-boot-ok
 bootlog=$tree/usr/libexec/microos/microos-bootlog
 applied=$tree/usr/libexec/microos/microos-update-applied
-update=$tree/usr/libexec/microos/microos-bootimg-update
-conf=$tree/usr/lib/microos/bootimg.conf
-build=$tree/usr/libexec/microos/microos-bootimg-build
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 rc=0
@@ -18,7 +15,7 @@ export MICROOS_RUNDIR=$tmp/run MICROOS_STATEDIR=$tmp/state MICROOS_ESP=$tmp/esp 
 export MICROOS_BOOT_OK_CONF=$tree/usr/lib/microos/boot-ok.conf
 export MICROOS_BOOTIMG_UPDATE=$here/bootok/bin/fake-bootimg-update
 export MICROOS_BOOT_OK_HOLD=0 MICROOS_BOOT_OK_STEP=1 MICROOS_BOOT_OK_WAIT=2
-export PATH=$here/bootok/bin:$here/bootimg/bin:$PATH
+export PATH=$here/bootok/bin:$PATH
 
 c() { local s; s=$(printf '%064d' 0); echo "${s//0/$1}"; }
 P=$(c a).0
@@ -451,94 +448,6 @@ echo "$B" > "$MICROOS_STATEDIR/confirmed"
 run || fail "pass with nothing to do: $(cat "$tmp/out")"
 [[ -z $(writes) ]] || fail "pin or unpin with nothing to do: $(writes)"
 [[ $(events) == "bak $B confirmed=$B" ]] || fail "--bak not called with nothing to do: $(events)"
-
-sys=$tmp/sysroot
-boot=$tmp/boot
-bootcsum=$(c f)
-kver=7.2.12-microos
-bdir=$boot/ostree/default-$bootcsum
-. "$conf"
-fixture() {
-  local i=0 id d
-  rm -rf "$sys" "$boot"
-  mkdir -p "$bdir/dtb/qcom" "$boot/loader/entries" "$sys/ostree/boot.1/default/$bootcsum"
-  { head -c 56 /dev/zero; printf 'ARMd'; seq 1 3000; } > "$bdir/vmlinuz-$kver"
-  seq 1 500 > "$bdir/initramfs-$kver.img"
-  { printf '\xd0\x0d\xfe\xed'; seq 1 50; } > "$bdir/dtb/$MICROOS_DTB"
-  for id; do
-    d=$sys/ostree/deploy/default/deploy/$id
-    mkdir -p "$d/usr/lib/microos" "$d/usr/libexec/microos"
-    cp "$conf" "$d/usr/lib/microos/"
-    cp "$build" "$d/usr/libexec/microos/"
-    echo "IMAGE_VERSION=20261013.1234567" > "$d/usr/lib/microos/version"
-    ln -s "../../../deploy/default/deploy/$id" "$sys/ostree/boot.1/default/$bootcsum/$i"
-    printf 'title MicroOS\nversion %s\noptions root=UUID=r rw ostree=/ostree/boot.1/default/%s/%s\nlinux %s\ninitrd %s\nfdtdir %s\n' \
-      "$(( 9 - i ))" "$bootcsum" "$i" "/boot/ostree/default-$bootcsum/vmlinuz-$kver" \
-      "/boot/ostree/default-$bootcsum/initramfs-$kver.img" "/boot/ostree/default-$bootcsum/dtb" \
-      > "$boot/loader/entries/ostree-$i.conf"
-    i=$((i + 1))
-  done
-}
-finalize() {
-  local id e l
-  for id in $(jq -r '.deployments[] | select((.pinned or .booted) | not) | "\(.checksum).\(.serial)"' "$FAKE_STATE/status.json"); do
-    rm -rf "$sys/ostree/deploy/default/deploy/$id"
-  done
-  for l in "$sys"/ostree/boot.1/default/"$bootcsum"/*; do
-    [[ -e $l ]] || rm -f "$l"
-  done
-  for e in "$boot"/loader/entries/*.conf; do
-    l=$(sed -n 's/^options .*ostree=\([^ ]*\).*/\1/p' "$e")
-    [[ -e $sys$l ]] || rm -f "$e"
-  done
-  jq '.deployments |= map(select(.pinned or .booted)) | .deployments |= (to_entries | map(.value.index = .key | .value))' \
-    "$FAKE_STATE/status.json" > "$FAKE_STATE/status.new"
-  mv -f "$FAKE_STATE/status.new" "$FAKE_STATE/status.json"
-}
-bak_ok() {
-  local name l t
-  [[ -e $MICROOS_ESP/KERNEL.BAK ]] || return 0
-  name=$(head -c 576 "$MICROOS_ESP/KERNEL.BAK" | tail -c 512 | tr -d '\0' | grep -o 'microos.deploy=[^ ]*' | cut -d= -f2)
-  for l in "$sys"/ostree/boot.{0,1}/*/*/*; do
-    t=$(realpath -e "$l" 2> /dev/null) || continue
-    [[ ${t##*/} != "$name" ]] || return 0
-  done
-  return 1
-}
-real() { MICROOS_BOOT=$boot MICROOS_SYSROOT=$sys "$update" "$@" > "$tmp/uout" 2>&1; }
-
-reset
-fixture "$B" "$P" "$D"
-st "$B b" "$P p" "$D"
-echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
-echo "$P" > "$MICROOS_STATEDIR/confirmed"
-real --bak "$P" || fail "fixture bake of P: $(cat "$tmp/uout")"
-{ FAKE_KILL_AFTER_PIN=1 run_rc; } 2> /dev/null
-[[ $(cat "$MICROOS_STATEDIR/confirmed") == "$P" ]] || fail "confirmed written before the kill"
-finalize
-real || fail "default run after a killed boot ok: $(cat "$tmp/uout")"
-bak_ok || fail "KERNEL.BAK names a deployment with no bootlink after a killed boot ok"
-reset
-fixture "$B" "$P" "$D"
-st "$B b" "$P p" "$D"
-real --bak "$P" || fail "fixture bake of P: $(cat "$tmp/uout")"
-st "$B b" "$P" "$D"
-{ FAKE_KILL_AFTER_PIN=1 run_rc; } 2> /dev/null
-finalize
-real || fail "default run after a killed first boot ok: $(cat "$tmp/uout")"
-bak_ok || fail "KERNEL.BAK names a deployment with no bootlink after a killed first boot ok"
-[[ -e $sys/ostree/deploy/default/deploy/$P ]] && fail "fixture finalize kept the unpinned P"
-echo "quiet microos.deploy=$B" > "$tmp/cmdline"
-rm -f "$MICROOS_ESP/.microos-bootimg.id"
-MICROOS_BOOT=$boot MICROOS_SYSROOT=$sys MICROOS_CMDLINE=$tmp/cmdline "$bootlog" run finalize -- "$update" > /dev/null 2>&1 ||
-  fail "bootlog run of the bake"
-[[ $(tail -n 1 "$boot/microos/shutdown.log") == *" step=finalize rc=0 booted=$B microos-bootimg-update: KERNEL $B baked, KERNEL.BAK $B kept" ]] ||
-  fail "finalize log line: $(tail -n 1 "$boot/microos/shutdown.log")"
-out=$(MICROOS_BOOT=$boot MICROOS_SYSROOT=$sys MICROOS_CMDLINE=$tmp/cmdline "$bootlog" run bak -- "$update" --bak "$B" 2> /dev/null) ||
-  fail "bootlog run of --bak"
-[[ $(grep '^bak ' <<< "$out") == "bak $B $(cat "$MICROOS_ESP/.microos-bootimg-bak.id")" ]] || fail "--bak line through bootlog: $out"
-[[ $(tail -n 1 "$boot/microos/shutdown.log") == *" step=bak rc=0 booted=$B microos-bootimg-update: KERNEL $B kept, KERNEL.BAK $B kept" ]] ||
-  fail "--bak log line: $(tail -n 1 "$boot/microos/shutdown.log")"
 
 export MICROOS_BOOT=$tmp/bootfs MICROOS_CMDLINE=$tmp/cmdline MICROOS_BOOTID=$tmp/bootid
 log=$MICROOS_BOOT/microos/shutdown.log

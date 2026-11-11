@@ -83,7 +83,6 @@ kept=(
   /usr/lib/tmpfiles.d/microos.conf
   /usr/libexec/microos/microos-boot-ok
   /usr/libexec/microos/microos-bootimg-build
-  /usr/libexec/microos/microos-bootimg-update
   /usr/libexec/microos/microos-bootlog
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-update-applied
