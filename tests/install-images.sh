@@ -10,6 +10,7 @@ efi_part=1073741824
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
+root_files=(haptic_ram.bin)
 bt_files=(hmtbtfw20.tlv hmtnv20_Kirby_row.bin)
 
 rc=0
@@ -181,7 +182,7 @@ fi
 
 fw=$T/ostree/deploy/default/var/lib/microos/fw
 dev=$fw/qcom/sm8650/lenovo/tb321fu
-tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" firmware/vpu33_4v.mbn
+tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" "${root_files[@]/#/firmware/}" firmware/vpu33_4v.mbn
 mcopy -n -i "$nonhlos" "::/image/adsp*" "::/image/cdsp*" "::/image/ipa_fws*" "$w/fw/nh/"
 mcopy -n -i "$btfm" "${bt_files[@]/#/::/image/}" "$w/fw/bt/"
 expect=(qcom/sm8650/lenovo/tb321fu/vpu33_p4.mbn)
@@ -202,6 +203,10 @@ done
 for f in "${gpu_files[@]}"; do
   cmp -s "$w/fw/firmware/$f" "$fw/qcom/$f" || fail "$fw/qcom/$f differs from the vendor copy"
   expect+=("qcom/$f")
+done
+for f in "${root_files[@]}"; do
+  cmp -s "$w/fw/firmware/$f" "$fw/$f" || fail "$fw/$f differs from the vendor copy"
+  expect+=("$f")
 done
 nnh=0
 for f in "$w"/fw/nh/*; do

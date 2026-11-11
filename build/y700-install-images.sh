@@ -13,6 +13,7 @@ f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
+root_files=(haptic_ram.bin)
 nonhlos_globs=("adsp*" "cdsp*" "ipa_fws*")
 vpu_vendor=vpu33_4v.mbn
 vpu_dts=vpu33_p4.mbn
@@ -218,13 +219,16 @@ fi
 log "firmware"
 fw=$var/lib/microos/fw
 dev=$fw/qcom/sm8650/lenovo/tb321fu
-tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" "firmware/$vpu_vendor"
+tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" "${root_files[@]/#/firmware/}" "firmware/$vpu_vendor"
 install -D -m 0644 "$w/fw/firmware/$vpu_vendor" "$dev/$vpu_dts"
 for f in "${vendor_files[@]}"; do
   install -D -m 0644 "$w/fw/firmware/$f" "$dev/$f"
 done
 for f in "${gpu_files[@]}"; do
   install -D -m 0644 "$w/fw/firmware/$f" "$fw/qcom/$f"
+done
+for f in "${root_files[@]}"; do
+  install -D -m 0644 "$w/fw/firmware/$f" "$fw/$f"
 done
 mcopy -n -i "$nonhlos" "${nonhlos_globs[@]/#/::/image/}" "$w/fw/nh/"
 for f in "$w"/fw/nh/*; do
