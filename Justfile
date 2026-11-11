@@ -148,7 +148,7 @@ pkg-push name:
       exit 1
     fi
     COSIGN_PASSWORD=$(cat "$keys/microos.password") \
-      "$cosign" sign -y --new-bundle-format=false --key "$keys/microos.key" "$repo@$digest"
+      "$cosign" sign -y --new-bundle-format=false --use-signing-config=false --key "$keys/microos.key" "$repo@$digest"
     "$cosign" verify --key "$pub" "$repo@$digest" >/dev/null
     init=$(gh api "$api/versions" --jq '.[] | select(.metadata.container.tags | index("init")) | .id')
     if [[ -n $init ]]; then
