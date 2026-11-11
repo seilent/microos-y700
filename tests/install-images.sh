@@ -110,6 +110,10 @@ if [[ -n ${KROUND:-} ]]; then
     for k in "microos.kround=$KROUND" "microos.deploy=$DEPLOYMENT" "microos.id=${id:0:12}"; do
       [[ $cw == *" $k "* ]] || fail "$name: no $k in the cmdline"
     done
+    case $KROUND in
+      p1a|p1a-*) [[ $cw == *" msm.separate_gpu_kms=1 "* ]] || fail "$name: no msm.separate_gpu_kms=1" ;;
+      *) [[ $cw != *" msm.separate_gpu_kms="* ]] || fail "$name: msm.separate_gpu_kms= outside p1a" ;;
+    esac
     [[ $cw =~ \ ostree=/ostree/boot\.[01]/default/[0-9a-f]{64}/[0-9]+\  ]] || fail "$name: ostree= is not a boot link"
     [[ $cw == *" microos.test="* ]] || fail "$name: no microos.test"
     [[ $cw == *" maxcpus="[17]" "* ]] || fail "$name: no stub maxcpus"
