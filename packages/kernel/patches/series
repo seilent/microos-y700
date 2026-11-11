@@ -11,3 +11,12 @@
 0010-Input-aw86927-add-support-for-AW86937.patch
 0011-dt-bindings-usb-Add-Parade-PS5169-USB-C-redriver.patch
 0012-usb-typec-mux-Add-Parade-PS5169-redriver-driver.patch
+0020-ASoC-dt-bindings-awinic-aw88395-Add-AW88461.patch
+0021-ASoC-codecs-aw88261-Enable-I2S-TX-in-I2SCTRL3.patch
+0022-ASoC-codecs-aw88261-Keep-the-volume-across-profile-c.patch
+0023-ASoC-codecs-aw88261-Add-AW88461-support.patch
+0024-ASoC-codecs-aw88261-Enable-TX-feedback-only-with-a-T.patch
+0025-ASoC-qcom-q6prm-Add-TDM-bit-clocks.patch
+0026-ASoC-qcom-audioreach-Add-legacy-TDM-sink-and-source.patch
+0027-ASoC-dt-bindings-qcom-sm8250-Add-Lenovo-Legion-Y700-.patch
+0028-ASoC-qcom-sc8280xp-Add-Lenovo-Legion-Y700-2025-sound.patch
