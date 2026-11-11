@@ -86,6 +86,7 @@ kept=(
   /usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
+  /usr/lib/modprobe.d/microos-y700-rtc.conf
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf
@@ -263,6 +264,8 @@ done <<< "$seedfiles"
 
 ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turnip (freedreno) Vulkan ICD"
 [[ $(< /usr/lib/modules-load.d/microos-y700.conf) == pci-pwrctrl-pwrseq ]] || fail "modules-load.d microos-y700.conf"
+[[ $(< /usr/lib/modprobe.d/microos-y700-rtc.conf) == 'blacklist rtc_pm8xxx' ]] || fail "modprobe.d microos-y700-rtc.conf"
+[[ $(readlink /etc/systemd/system-generators/systemd-gpt-auto-generator) == /dev/null ]] || fail "systemd-gpt-auto-generator is not masked"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
   drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/input/touchscreen/nt36523/nt36523_ts \
   drivers/power/supply/qcom_battmgr; do
@@ -333,7 +336,7 @@ for kv in 'passwordauthentication no' 'kbdinteractiveauthentication no' 'permitr
   grep -qx "$kv" "$tmp/sshd" || fail "sshd -T lacks '$kv'"
 done
 
-systemd-sysusers >/dev/null 2>&1
+grep -q '^micro:x:1000:1000:' /etc/passwd || fail "micro is not in the image /etc/passwd"
 [[ $(id -u micro):$(id -g micro) == 1000:1000 ]] || fail "micro is not 1000:1000"
 groups=$(id -nG micro)
 for g in wheel systemd-journal; do

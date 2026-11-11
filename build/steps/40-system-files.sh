@@ -9,6 +9,9 @@ while read -r t u g; do
     grep "^$g:" /usr/lib/group >> /etc/group
   fi
 done < /usr/lib/sysusers.d/microos.conf
+systemd-sysusers /usr/lib/sysusers.d/microos.conf
+mkdir -p /etc/systemd/system-generators
+ln -sfn /dev/null /etc/systemd/system-generators/systemd-gpt-auto-generator
 
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
