@@ -62,7 +62,7 @@ bootimg() {
   printf '%s' "${cmd:0:511}" | put "$MICROOS_BOOT_B" 64
   printf '%s' "${cmd:511}" | put "$MICROOS_BOOT_B" 608
 }
-stub() { mem32 0x2000 $(( 0x5744 << 16 | $1 )); mem32 0x2004 "$2"; }
+stub() { mem32 0x2004 "$2"; mem32 0x2000 $(( 0x5744 << 16 | $1 )); }
 responder() {
   for _ in $(seq 1 50); do
     if [[ $(memword 0x2040) == $(( 0x4449534d )) ]]; then
