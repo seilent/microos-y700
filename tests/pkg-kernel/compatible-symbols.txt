@@ -17,8 +17,11 @@ arm,mmu-500 ARM_SMMU
 arm,primecell -
 arm,psci-1.0 ARM_PSCI_FW
 awinic,aw37503 REGULATOR_AW37503
+awinic,aw86927 INPUT_AW86927
+awinic,aw86937 INPUT_AW86927
 cache -
 domain-idle-state ARM_PSCI_CPUIDLE_DOMAIN
+fcs,fsa4480 TYPEC_MUX_FSA4480
 fixed-clock COMMON_CLK
 fixed-factor-clock -
 gpio-keys KEYBOARD_GPIO
@@ -31,6 +34,7 @@ novatek,nt36523-ts TOUCHSCREEN_NOVATEK_NT36523
 nvmem-reboot-mode NVMEM_REBOOT_MODE
 nxp,ptn3222 PHY_NXP_PTN3222
 operating-points-v2 -
+parade,ps5169 TYPEC_MUX_PS5169
 pci17cb,1107 PCI_PWRCTRL_PWRSEQ
 qcom,adreno DRM_MSM
 qcom,adreno-gmu DRM_MSM

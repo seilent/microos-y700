@@ -27,7 +27,7 @@ builtin=(
   DRM_MSM DRM_MSM_MDSS DRM_MSM_DPU DRM_MSM_DSI DRM_MSM_DSI_7NM_PHY DRM_MSM_DP DRM_DISPLAY_DSC_HELPER
   DRM_PANEL_NOVATEK_NT36523 BACKLIGHT_CLASS_DEVICE BACKLIGHT_KTZ8866 REGULATOR_AW37503 FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
   I2C_QCOM_GENI QCOM_GPI_DMA SCSI_UFS_QCOM PHY_QCOM_QMP_UFS QCOM_PMIC_GLINK UCSI_PMIC_GLINK
-  PHY_QCOM_QMP_COMBO DRM_AUX_BRIDGE DRM_AUX_HPD_BRIDGE TYPEC
+  PHY_QCOM_QMP_COMBO DRM_AUX_BRIDGE DRM_AUX_HPD_BRIDGE TYPEC TYPEC_MUX_PS5169 TYPEC_MUX_FSA4480
   FTRACE TRACING EVENT_TRACING TRACEPOINTS PM_DEBUG PM_SLEEP_DEBUG HIDRAW NTSYNC LRU_GEN_ENABLED
   SECURITY_YAMA HOTPLUG_PCI_PCIE UCLAMP_TASK UCLAMP_TASK_GROUP CGROUP_BPF BPF_SYSCALL
   NETFILTER_NETLINK IP_ADVANCED_ROUTER IP_MULTIPLE_TABLES IPV6_MULTIPLE_TABLES FIB_RULES
@@ -42,7 +42,7 @@ grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-k
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
-  snd-soc-wcd939x novatek-nt36523; do
+  snd-soc-wcd939x novatek-nt36523 aw86927; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 
@@ -119,6 +119,41 @@ fw=qcom/sm8650/lenovo/tb321fu/novatek_ts
 [[ $(fdtget "$main" "$ts" firmware-name) == "${fw}_boe_fw.bin" ]] || { echo "pkg-kernel: main dtb touch firmware" >&2; exit 1; }
 [[ $(fdtget "$abl" "$ts" firmware-name) == "${fw}_boe_fw.bin" ]] || { echo "pkg-kernel: abl dtb touch firmware" >&2; exit 1; }
 [[ $(fdtget "$csot" "$ts" firmware-name) == "${fw}_csot_fw.bin" ]] || { echo "pkg-kernel: csot dtb touch firmware" >&2; exit 1; }
+
+i2c7=/soc@0/geniqup@ac0000/i2c@a9c000
+i2c6=/soc@0/geniqup@ac0000/i2c@a98000
+mux=$i2c6/typec-mux@30
+glink=/pmic-glink/connector@0/ports
+qmp=/soc@0/phy@88e8000/ports/port@0/endpoint
+for d in "$main" "$csot" "$abl"; do
+  n=$(basename "$d")
+  [[ $(fdtget -d okay "$d" "$i2c7" status) == okay && $(fdtget "$d" "$i2c7" clock-frequency) == 1000000 ]] ||
+    { echo "pkg-kernel: $n i2c7" >&2; exit 1; }
+  for v in "5a 92 127" "5b 88 119"; do
+    read -r a irq rst <<<"$v"
+    h=$i2c7/vibrator@$a
+    [[ $(fdtget "$d" "$h" compatible) == "awinic,aw86937 awinic,aw86927" ]] || { echo "pkg-kernel: $n vibrator@$a compatible" >&2; exit 1; }
+    [[ $(fdtget "$d" "$h" interrupts-extended | cut -d' ' -f2-) == "$irq 2" ]] || { echo "pkg-kernel: $n vibrator@$a irq" >&2; exit 1; }
+    [[ $(fdtget "$d" "$h" reset-gpios | cut -d' ' -f2-) == "$rst 1" ]] || { echo "pkg-kernel: $n vibrator@$a reset" >&2; exit 1; }
+  done
+  [[ $(fdtget -d okay "$d" "$mux" status) == okay && $(fdtget "$d" "$mux" compatible) == parade,ps5169 ]] ||
+    { echo "pkg-kernel: $n ps5169 is off" >&2; exit 1; }
+  fdtget "$d" "$mux" orientation-switch > /dev/null && fdtget "$d" "$mux" retimer-switch > /dev/null ||
+    { echo "pkg-kernel: $n ps5169 switches" >&2; exit 1; }
+  ep() { fdtget -t x "$d" "$1" phandle; }
+  [[ $(fdtget -t x "$d" "$glink/port@1/endpoint" remote-endpoint) == "$(ep "$mux/ports/port@0/endpoint")" &&
+    $(fdtget -t x "$d" "$mux/ports/port@1/endpoint" remote-endpoint) == "$(ep "$qmp")" &&
+    $(fdtget -t x "$d" "$qmp" remote-endpoint) == "$(ep "$mux/ports/port@1/endpoint")" ]] ||
+    { echo "pkg-kernel: $n ps5169 graph" >&2; exit 1; }
+  sbu=$i2c6/typec-mux@43
+  [[ $(fdtget -d okay "$d" "$sbu" status) == okay && $(fdtget "$d" "$sbu" compatible) == fcs,fsa4480 &&
+    $(fdtget -t x "$d" "$glink/port@2/endpoint" remote-endpoint) == "$(ep "$sbu/port/endpoint")" ]] ||
+    { echo "pkg-kernel: $n fsa4480 sbu graph" >&2; exit 1; }
+  [[ $(fdtget -t x "$d" "$glink/port@0/endpoint" remote-endpoint) == "$(ep /soc@0/usb@a600000/ports/port@0/endpoint)" ]] ||
+    { echo "pkg-kernel: $n gadget hs graph" >&2; exit 1; }
+  [[ $(fdtget "$d" /soc@0/usb@a600000 dr_mode) == peripheral ]] || { echo "pkg-kernel: $n usb_1 dr_mode" >&2; exit 1; }
+  [[ $(fdtget -d okay "$d" "$disp/displayport-controller@af54000" status) == disabled ]] || { echo "pkg-kernel: $n dp0 is on" >&2; exit 1; }
+done
 
 dtbo=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-dtbo.img
 [[ -f $dtbo ]] || { echo "pkg-kernel: dtbo image missing" >&2; exit 1; }
