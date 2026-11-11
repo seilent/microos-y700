@@ -18,6 +18,7 @@ export MICROOS_SDAM_LIB=$tree/usr/libexec/microos/microos-sdam MICROOS_STUB_CONF
 export MICROOS_DEVMEM=$tmp/mem MICROOS_DEVMEM_BASE=0xd60a0000 MICROOS_STUB_WAIT=2
 export MICROOS_SLOT_CONF=$tmp/slot.conf MICROOS_SLOT=$here/bootok/bin/microos-slot
 export MICROOS_BOOT_OK_HOLD=0 MICROOS_BOOT_OK_STEP=1 MICROOS_BOOT_OK_WAIT=2
+export MICROOS_UDC=$tmp/sys/udc MICROOS_NET=$tmp/sys/net MICROOS_DRM=$tmp/sys/drm MICROOS_INPUT=$tmp/sys/input
 export PATH=$here/bootok/bin:$PATH
 
 c() { local s; s=$(printf '%064d' 0); echo "${s//0/$1}"; }
@@ -383,6 +384,107 @@ st "$B b"
 rm "$MICROOS_NVMEM_ROOT/spmi_sdam1/of_node"
 run || fail "no SDAM: $(cat "$tmp/out")"
 has "fastboot preset not cleared, no SDAM nvram@7100" || fail "missing SDAM not reported: $(cat "$tmp/out")"
+
+indev() {
+  mkdir -p "$tmp/sys/input/$1/capabilities"
+  echo "$2" > "$tmp/sys/input/$1/properties"
+  echo "$3" > "$tmp/sys/input/$1/capabilities/abs"
+  echo "$4" > "$tmp/sys/input/$1/capabilities/key"
+}
+kround() {
+  reset
+  rm -rf "$tmp/sys"
+  mkdir -p "$tmp/sys/udc/a600000.usb" "$tmp/sys/net/wlp1s0/wireless" "$tmp/sys/drm/card1-DSI-1" "$tmp/sys/input"
+  echo configured > "$tmp/sys/udc/a600000.usb/state"
+  echo disconnected > "$tmp/sys/drm/card1-DSI-1/status"
+  echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.kround=$1" > "$tmp/proc-cmdline"
+  st "$B b" "$P p"
+  echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
+  echo "$P" > "$MICROOS_STATEDIR/confirmed"
+}
+kept() {
+  [[ -z $(writes) && -z $(events) ]] || fail "$1: ostree pin or unpin: $(writes)"
+  [[ $(pins) == "$P" && $(cat "$MICROOS_STATEDIR/confirmed") == "$P" ]] || fail "$1: boot-ok-pins $(pins), confirmed changed"
+  [[ ! -e $MICROOS_RUNDIR/deployments ]] || fail "$1: deployments written"
+  is_pinned "$P" || fail "$1: P unpinned"
+  ! is_pinned "$B" || fail "$1: booted pinned"
+}
+kfail() {
+  run_rc
+  (( r == 1 )) || fail "$1: exit $r"
+  has "not confirmed: $2" || fail "$1: message: $(cat "$tmp/out")"
+  kept "$1"
+  [[ ! -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 2" && $(sdam) == 05 ]] \
+    || fail "$1: acted on a failed check: counter $(attempts), sdam $(sdam)"
+}
+
+kround p1a
+echo "$B" > "$MICROOS_STATEDIR/boot-ok-skip"
+stub 2 7
+responder &
+resp=$!
+MICROOS_BOOT_OK_HOLD=2 run || fail "kround p1a pass: $(cat "$tmp/out")"
+wait "$resp" || true
+kept "kround p1a pass"
+has "kround p1a: checks udc wlan0" || fail "kround checks not reported: $(cat "$tmp/out")"
+[[ $(cat "$MICROOS_STATEDIR/boot-ok-skip" 2> /dev/null) == "$B" ]] || fail "kround consumed boot-ok-skip"
+[[ $(cat "$MICROOS_RUNDIR/boot-confirmed") == "$B" ]] || fail "kround boot-confirmed"
+[[ $(attempts) == "$ID 0" ]] || fail "kround counter: $(attempts)"
+has "stub stopped at 9 s" || fail "kround stub stop: $(cat "$tmp/out")"
+[[ $(sdam) == 01 ]] || fail "kround preset byte $(sdam)"
+[[ $(tail -n 1 "$tmp/out") == "microos-boot-ok: confirmed $B" ]] || fail "kround last line: $(tail -n 1 "$tmp/out")"
+kround p0
+run || fail "kround p0 pass: $(cat "$tmp/out")"
+kept "kround p0 pass"
+for u in microos-usb-console.service NetworkManager-wait-online.service; do
+  kround p1a
+  FAKE_SYSTEM=degraded FAKE_FAILED_UNITS=$u kfail "kround with $u failed" "failed: $u after 2 s"
+  reset
+  st "$B b"
+  FAKE_SYSTEM=degraded FAKE_FAILED_UNITS=$u run || fail "$u failed outside kround: $(cat "$tmp/out")"
+done
+kround p1a
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS="chronyd.service sddm.service" run || fail "kround with allowed failures: $(cat "$tmp/out")"
+kround p1a
+echo "not attached" > "$tmp/sys/udc/a600000.usb/state"
+kfail "kround p1a gadget down" "kround p1a: no UDC configured after 2 s"
+kround p1a
+rm -rf "$tmp/sys/udc/a600000.usb"
+kfail "kround p1a no UDC" "kround p1a: no UDC configured after 2 s"
+kround p1a
+rmdir "$tmp/sys/net/wlp1s0/wireless"
+kfail "kround p1a no wlan0" "kround p1a: no wireless interface after 2 s"
+kround p1a
+FAKE_INACTIVE=sshd.service kfail "kround p1a sshd down" "sshd.service is not active after 2 s"
+kround p1b
+kfail "kround p1b panel off" "kround p1b: no DSI-1 connected after 2 s"
+kround p1b
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+run || fail "kround p1b pass: $(cat "$tmp/out")"
+kept "kround p1b pass"
+kround p1c
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+indev input1 0 "260800000000003" 0
+indev input2 0 "3" "c03 0 0 0 0 0"
+kfail "kround p1c no touch" "kround p1c: no touchscreen input device after 2 s"
+kround p1c
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+indev input3 2 "660800000000003" "400 0 0 0 0 0"
+kfail "kround p1c no pen" "kround p1c: no pen input device after 2 s"
+kround p1c
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+indev input3 2 "660800000000003" "400 0 0 0 0 0"
+indev input4 2 "1000003" "c03 0 0 0 0 0"
+run || fail "kround p1c pass: $(cat "$tmp/out")"
+kept "kround p1c pass"
+for k in p1a-hang p9 p1d; do
+  kround "$k"
+  echo "$B" > "$MICROOS_STATEDIR/boot-ok-skip"
+  t0=$SECONDS
+  kfail "kround $k" "kround $k has no checks"
+  (( SECONDS - t0 < 2 )) || fail "kround $k waited"
+  [[ $(cat "$MICROOS_STATEDIR/boot-ok-skip" 2> /dev/null) == "$B" ]] || fail "kround $k consumed boot-ok-skip"
+done
 
 export MICROOS_BOOT=$tmp/bootfs MICROOS_CMDLINE=$tmp/cmdline MICROOS_BOOTID=$tmp/bootid
 log=$MICROOS_BOOT/microos/shutdown.log
