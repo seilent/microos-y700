@@ -28,7 +28,7 @@ rpm -q chrony NetworkManager-wifi wpa_supplicant wireless-regdb atheros-firmware
   libXtst libSM libICE at-spi2-atk cups-libs libssh2 libva libvdpau google-noto-sans-cjk-vf-fonts \
   google-noto-color-emoji-fonts google-noto-sans-arabic-vf-fonts google-noto-sans-hebrew-vf-fonts \
   google-noto-sans-thai-vf-fonts google-noto-sans-devanagari-vf-fonts google-noto-sans-mono-vf-fonts upower procps-ng \
-  zstd >/dev/null || fail "Steam path rpms missing"
+  zstd pipewire pipewire-pulseaudio pipewire-alsa wireplumber alsa-ucm >/dev/null || fail "Steam path rpms missing"
 for c in mkbootimg unpack_bootimg avbtool skopeo jq flock python3 btrfs mkfs.vfat rsync dnsmasq sshd NetworkManager sudo \
   chronyd wpa_supplicant gamescope gamescope-session-plus vulkaninfo pgrep zstd; do
   command -v "$c" >/dev/null || fail "$c missing"
@@ -74,6 +74,11 @@ for u in "${tests[@]}"; do
 done
 [[ $(systemctl is-enabled microos-update-check.timer) == masked ]] || fail "microos-update-check.timer is not masked"
 [[ ! -e /usr/lib/systemd/user-preset/50-microos.preset ]] || fail "user 50-microos.preset in the image"
+for u in pipewire.socket pipewire-pulse.socket wireplumber.service; do
+  [[ $(systemctl --global is-enabled "$u") == enabled ]] || fail "user $u is not enabled"
+done
+null=/usr/share/pipewire/pipewire.conf.d/90-microos-null-sink.conf
+grep -qF 'factory.name = support.null-audio-sink' "$null" && grep -qF 'priority.session = 1' "$null" || fail "$null"
 [[ $(compgen -G '/usr/lib/systemd/user/microos-*') == /usr/lib/systemd/user/microos-steam-seed.service ]] \
   || fail "MicroOS user units: $(compgen -G '/usr/lib/systemd/user/microos-*' | tr '\n' ' ')"
 [[ $(< /usr/lib/systemd/system-preset/50-microos.preset) == 'enable microos-*' ]] || fail "50-microos.preset"
@@ -90,6 +95,8 @@ kept=(
   /usr/lib/modprobe.d/microos-y700-rtc.conf
   /usr/lib/udev/rules.d/59-microos-y700-input.rules
   /usr/lib/udev/rules.d/60-microos-backlight.rules
+  /usr/lib/systemd/user-preset/60-microos-audio.preset
+  /usr/share/pipewire/pipewire.conf.d/90-microos-null-sink.conf
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf

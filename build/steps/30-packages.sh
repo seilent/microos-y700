@@ -56,6 +56,11 @@ dnf -y install \
   gtk2 \
   gtk3 \
   openal-soft \
+  pipewire \
+  pipewire-pulseaudio \
+  pipewire-alsa \
+  wireplumber \
+  alsa-ucm \
   sdl2-compat \
   libXcomposite \
   libXdamage \
