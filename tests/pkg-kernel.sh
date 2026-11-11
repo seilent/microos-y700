@@ -42,7 +42,7 @@ grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-k
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
-  snd-soc-wcd939x; do
+  snd-soc-wcd939x novatek-nt36523; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 
@@ -100,6 +100,25 @@ done
 [[ $(fdtget "$main" "$panel" compatible) == "lenovo,tb321fu-boe-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: main dtb panel" >&2; exit 1; }
 [[ $(fdtget "$abl" "$panel" compatible) == "lenovo,tb321fu-boe-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: abl dtb panel" >&2; exit 1; }
 [[ $(fdtget "$csot" "$panel" compatible) == "lenovo,tb321fu-csot-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: csot dtb panel" >&2; exit 1; }
+
+spi=/soc@0/geniqup@ac0000/spi@a90000
+ts=$spi/touchscreen@0
+for d in "$main" "$csot" "$abl"; do
+  n=$(basename "$d")
+  [[ $(fdtget -d okay "$d" "$spi" status) == okay ]] || { echo "pkg-kernel: $n spi4 is off" >&2; exit 1; }
+  [[ $(fdtget "$d" "$ts" compatible) == novatek,nt36523-ts ]] || { echo "pkg-kernel: $n touchscreen compatible" >&2; exit 1; }
+  [[ $(fdtget -t x "$d" "$ts" panel) == "$(fdtget -t x "$d" "$panel" phandle)" ]] || { echo "pkg-kernel: $n touchscreen panel" >&2; exit 1; }
+  v="$(fdtget "$d" "$ts" touchscreen-size-x) $(fdtget "$d" "$ts" touchscreen-size-y) $(fdtget "$d" "$ts" touchscreen-x-mm)"
+  v+=" $(fdtget "$d" "$ts" touchscreen-y-mm) $(fdtget "$d" "$ts" spi-max-frequency)"
+  [[ $v == "16000 25600 118 190 9600000" ]] || { echo "pkg-kernel: $n touchscreen settings $v" >&2; exit 1; }
+  fdtget "$d" "$ts" touchscreen-inverted-x > /dev/null && fdtget "$d" "$ts" touchscreen-swapped-x-y > /dev/null ||
+    { echo "pkg-kernel: $n touchscreen orientation" >&2; exit 1; }
+  ! fdtget "$d" "$ts" touchscreen-inverted-y > /dev/null 2>&1 || { echo "pkg-kernel: $n touchscreen inverts y" >&2; exit 1; }
+done
+fw=qcom/sm8650/lenovo/tb321fu/novatek_ts
+[[ $(fdtget "$main" "$ts" firmware-name) == "${fw}_boe_fw.bin" ]] || { echo "pkg-kernel: main dtb touch firmware" >&2; exit 1; }
+[[ $(fdtget "$abl" "$ts" firmware-name) == "${fw}_boe_fw.bin" ]] || { echo "pkg-kernel: abl dtb touch firmware" >&2; exit 1; }
+[[ $(fdtget "$csot" "$ts" firmware-name) == "${fw}_csot_fw.bin" ]] || { echo "pkg-kernel: csot dtb touch firmware" >&2; exit 1; }
 
 dtbo=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-dtbo.img
 [[ -f $dtbo ]] || { echo "pkg-kernel: dtbo image missing" >&2; exit 1; }
