@@ -13,7 +13,10 @@ fail() { echo "FAIL: $*" >&2; rc=1; }
 
 export MICROOS_RUNDIR=$tmp/run MICROOS_STATEDIR=$tmp/state MICROOS_ESP=$tmp/esp FAKE_STATE=$tmp/fake
 export MICROOS_BOOT_OK_CONF=$tree/usr/lib/microos/boot-ok.conf
-export MICROOS_BOOTIMG_UPDATE=$here/bootok/bin/fake-bootimg-update
+export MICROOS_CMDLINE=$tmp/proc-cmdline MICROOS_BOOT_B=$tmp/boot_b MICROOS_NVMEM_ROOT=$tmp/nvmem MICROOS_SDAM_TRIES=1
+export MICROOS_SDAM_LIB=$tree/usr/libexec/microos/microos-sdam MICROOS_STUB_CONF=$tree/usr/lib/microos/stub.conf
+export MICROOS_DEVMEM=$tmp/mem MICROOS_DEVMEM_BASE=0xd60a0000 MICROOS_STUB_WAIT=2
+export MICROOS_SLOT_CONF=$tmp/slot.conf MICROOS_SLOT=$here/bootok/bin/microos-slot
 export MICROOS_BOOT_OK_HOLD=0 MICROOS_BOOT_OK_STEP=1 MICROOS_BOOT_OK_WAIT=2
 export PATH=$here/bootok/bin:$PATH
 
@@ -40,13 +43,47 @@ st() {
     printf ']}\n'
   } > "$FAKE_STATE/status.json"
 }
+ID=0123456789ab
+le32() { printf "$(printf '\\x%02x' $(( $1 & 0xff )) $(( $1 >> 8 & 0xff )) $(( $1 >> 16 & 0xff )) $(( $1 >> 24 & 0xff )))"; }
+put() { dd of="$1" bs=1 seek="$(( $2 ))" conv=notrunc status=none; }
+mem32() { le32 "$2" | put "$MICROOS_DEVMEM" "$1"; }
+memword() { od -An -tu4 -j "$(( $1 ))" -N4 "$MICROOS_DEVMEM" | tr -d ' '; }
+sdam() { od -An -tx1 -j72 -N1 "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" | tr -d ' \n'; }
+attempts() { cat "$MICROOS_ESP/microos/boot-attempts" 2> /dev/null || echo none; }
+slotlog() { cat "$FAKE_STATE/slot.log" 2> /dev/null || true; }
+has() { grep -qF -- "$1" "$tmp/out"; }
+bootimg() {
+  local cmd=$1 ver=${2:-2}
+  rm -f "$MICROOS_BOOT_B"
+  truncate -s 4096 "$MICROOS_BOOT_B"
+  printf 'ANDROID!' | put "$MICROOS_BOOT_B" 0
+  le32 "$ver" | put "$MICROOS_BOOT_B" 40
+  printf '%s' "${cmd:0:511}" | put "$MICROOS_BOOT_B" 64
+  printf '%s' "${cmd:511}" | put "$MICROOS_BOOT_B" 608
+}
+stub() { mem32 0x2000 $(( 0x5744 << 16 | $1 )); mem32 0x2004 "$2"; }
+responder() {
+  for _ in $(seq 1 50); do
+    if [[ $(memword 0x2040) == $(( 0x4449534d )) ]]; then
+      stub 3 9
+      return
+    fi
+    sleep 0.1
+  done
+}
 reset() {
   rm -rf "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$MICROOS_ESP" "$FAKE_STATE/status.json" "$FAKE_STATE/reads" \
-    "$FAKE_STATE/events" "$FAKE_STATE/ostree.log" "$FAKE_STATE/lockprobe" "$FAKE_STATE/shifted" "$FAKE_STATE/shifted-pin" "$FAKE_STATE/stages" \
-    "$FAKE_STATE/bak-sleeping" "$FAKE_STATE/user.log" "$FAKE_STATE/user-reads" "$FAKE_STATE/setpriv.log" \
-    "$FAKE_STATE/setpriv-fds.log" "$FAKE_STATE/late-reads"
-  mkdir -p "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$MICROOS_ESP" "$FAKE_STATE"
-  echo "steam gamescope-session-plus@steam.service 1" > "$MICROOS_RUNDIR/session-current"
+    "$FAKE_STATE/events" "$FAKE_STATE/ostree.log" "$FAKE_STATE/lockprobe" "$FAKE_STATE/shifted" "$FAKE_STATE/shifted-pin" \
+    "$FAKE_STATE/stages" "$FAKE_STATE/system-reads" "$FAKE_STATE/slot.log" "$MICROOS_NVMEM_ROOT" "$MICROOS_DEVMEM" "$MICROOS_BOOT_B"
+  mkdir -p "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$MICROOS_ESP/microos" "$FAKE_STATE" "$MICROOS_NVMEM_ROOT/spmi_sdam1" "$tmp/dt/nvram@7100"
+  head -c 256 /dev/zero > "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem"
+  printf '\005' | put "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" 72
+  ln -sfn "$tmp/dt/nvram@7100" "$MICROOS_NVMEM_ROOT/spmi_sdam1/of_node"
+  truncate -s $(( 0x3000 )) "$MICROOS_DEVMEM"
+  echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID" > "$tmp/proc-cmdline"
+  echo "$ID 2" > "$MICROOS_ESP/microos/boot-attempts"
+  bootimg "root=PARTLABEL=microos microos.id=ba9876543210"
+  echo MICROOS_SLOT_WRITE=0 > "$MICROOS_SLOT_CONF"
 }
 is_pinned() { jq -e --arg id "$1" 'any(.deployments[]; .pinned and "\(.checksum).\(.serial)" == $id)' "$FAKE_STATE/status.json" > /dev/null; }
 pins() { paste -sd, "$MICROOS_STATEDIR/boot-ok-pins" 2> /dev/null || true; }
@@ -64,9 +101,8 @@ echo "$P" > "$MICROOS_STATEDIR/confirmed"
 MICROOS_BOOT_OK_HOLD=2 run || fail "criterion pass: $(cat "$tmp/out")"
 mapfile -t ev < <(events)
 [[ ${ev[0]:-} == "pin booted pins=$P,$B confirmed=$P" ]] || fail "first event is not the pin after the append: ${ev[0]:-}"
-[[ ${ev[1]:-} == "bak $B confirmed=$B" ]] || fail "second event is not --bak after confirmed: ${ev[1]:-}"
-[[ ${ev[2]:-} == "unpin 1 $P" ]] || fail "third event is not the unpin of the listed id: ${ev[2]:-}"
-(( ${#ev[@]} == 3 )) || fail "extra events: $(events)"
+[[ ${ev[1]:-} == "unpin 1 $P" ]] || fail "second event is not the unpin of the listed id: ${ev[1]:-}"
+(( ${#ev[@]} == 2 )) || fail "extra events: $(events)"
 [[ $(pins) == "$B" ]] || fail "boot-ok-pins after a pass: $(pins)"
 [[ $(cat "$MICROOS_STATEDIR/confirmed") == "$B" ]] || fail "confirmed after a pass"
 is_pinned "$B" || fail "booted not pinned after a pass"
@@ -102,9 +138,23 @@ wait "$holder" 2> /dev/null || true
 reset
 st "$B b" "$P p"
 echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
-FAKE_FAILED=NetworkManager.service MICROOS_BOOT_OK_HOLD=2 run_rc
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS="NetworkManager.service foo.service" MICROOS_BOOT_OK_HOLD=2 run_rc
 (( r == 1 )) || fail "failed unit exit $r"
-[[ -z $(writes) && -z $(events) ]] || fail "a failed unit still pinned or baked: $(events)"
+has "not confirmed: failed: NetworkManager.service foo.service after 2 s" || fail "failed unit message: $(cat "$tmp/out")"
+[[ -z $(writes) && -z $(events) ]] || fail "a failed unit still pinned: $(events)"
+[[ ! -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "boot-confirmed written with a failed unit"
+reset
+st "$B b"
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS="foo.service" MICROOS_BOOT_OK_ALLOW="bar.service foo.service" MICROOS_BOOT_OK_HOLD=2 run \
+  || fail "degraded with an allowed failure: $(cat "$tmp/out")"
+reset
+st "$B b"
+FAKE_STARTING=2 run || fail "system running after a wait: $(cat "$tmp/out")"
+reset
+st "$B b"
+FAKE_DEGRADED_AFTER=2 FAKE_FAILED_UNITS=sshd.service MICROOS_BOOT_OK_HOLD=3 run_rc
+(( r == 1 )) || fail "failure in the hold: exit $r"
+has "not confirmed: failed: sshd.service after 2 s of the hold" || fail "hold failure message: $(cat "$tmp/out")"
 
 reset
 st "$B b"
@@ -118,186 +168,14 @@ FAKE_INACTIVE=sshd.service MICROOS_BOOT_OK_HOLD=2 run_rc
 reset
 st "$B b"
 t0=$SECONDS
-FAKE_INACTIVE=multi-user.target run_rc
-(( r == 1 )) || fail "target never active: exit $r"
-(( SECONDS - t0 >= 2 )) || fail "target wait shorter than MICROOS_BOOT_OK_WAIT"
+FAKE_SYSTEM=starting run_rc
+(( r == 1 )) || fail "system never running: exit $r"
+(( SECONDS - t0 >= 2 )) || fail "system wait shorter than MICROOS_BOOT_OK_WAIT"
+has "not confirmed: system starting after 2 s" || fail "gate timeout message: $(cat "$tmp/out")"
+stub 2 7
+[[ ! -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 2" && $(sdam) == 05 && $(memword 0x2040) == 0 ]] \
+  || fail "gate timeout acted: counter $(attempts), sdam $(sdam), disarm $(memword 0x2040)"
 
-S=gamescope-session-plus@steam.service
-reset
-st "$B b"
-t0=$SECONDS
-MICROOS_BOOT_OK_USER_ACTIVE=$S FAKE_USER_INACTIVE=$S run_rc
-(( r == 1 )) || fail "session never active: exit $r"
-(( SECONDS - t0 >= 2 )) || fail "session wait shorter than MICROOS_BOOT_OK_WAIT"
-grep -q "not confirmed: $S not active after 2 s" "$tmp/out" || fail "session never active message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with the session never active: $(events)"
-reset
-st "$B b"
-MICROOS_BOOT_OK_USER_ACTIVE=$S FAKE_USER_RESTART_AFTER=2 MICROOS_BOOT_OK_HOLD=3 run_rc
-(( r == 1 )) || fail "session restarted: exit $r"
-grep -q "not confirmed: $S restarted" "$tmp/out" || fail "session restarted message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with a restarted session: $(events)"
-reset
-st "$B b"
-(
-  for n in $(seq 3 64); do eval "exec $n>&-"; done
-  MICROOS_BOOT_OK_USER_ACTIVE=$S FAKE_USER_ACTIVE_AFTER=1 MICROOS_BOOT_OK_HOLD=3 run
-) || fail "session active through the hold: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned with the session active through the hold"
-(( $(cat "$FAKE_STATE/user-reads") >= 5 )) || fail "session read $(cat "$FAKE_STATE/user-reads") times in the wait and hold"
-[[ $(sort -u "$FAKE_STATE/user.log") == "systemctl --user show -p ActiveState,InvocationID,FragmentPath,DropInPaths $S" ]] ||
-  fail "session query: $(sort -u "$FAKE_STATE/user.log")"
-[[ $(sort -u "$FAKE_STATE/setpriv.log") == "setpriv --reuid=1000 --regid=1001 --init-groups --no-new-privs env -i XDG_RUNTIME_DIR=/run/user/1000 systemctl --user show -p ActiveState,InvocationID,FragmentPath,DropInPaths $S" ]] ||
-  fail "session query user: $(sort -u "$FAKE_STATE/setpriv.log")"
-[[ $(sort -u "$FAKE_STATE/setpriv-fds.log") == /dev/null ]] || fail "session query stdin or extra fds: $(sort -u "$FAKE_STATE/setpriv-fds.log")"
-reset
-st "$B b"
-rm -f "$MICROOS_RUNDIR/session-current"
-MICROOS_BOOT_OK_USER_ACTIVE=foo.service run || fail "listed user unit with no session-current: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned with a listed user unit"
-[[ $(sort -u "$FAKE_STATE/user.log") == "systemctl --user show -p ActiveState,InvocationID,FragmentPath,DropInPaths foo.service" ]] ||
-  fail "session-current read with MICROOS_BOOT_OK_USER_ACTIVE set: $(sort -u "$FAKE_STATE/user.log")"
-reset
-st "$B b"
-MICROOS_BOOT_OK_USER_ACTIVE=$S FAKE_USER_DOWN=1 FAKE_INACTIVE_LATE=multi-user.target run_rc
-(( r == 1 )) || fail "target down after the session: exit $r"
-grep -q "not confirmed: multi-user.target not active after 2 s" "$tmp/out" || fail "target down after the session message: $(cat "$tmp/out")"
-reset
-st "$B b"
-FAKE_ID_G_FAIL=1 run_rc
-(( r == 1 )) || fail "no group for the user: exit $r"
-grep -q "^id:" "$tmp/out" && fail "id stderr in the output: $(cat "$tmp/out")"
-reset
-st "$B b"
-FAKE_USER_DOWN=2 run || fail "user manager up late: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned after the user manager came up"
-(( $(cat "$FAKE_STATE/user-reads") >= 3 )) || fail "user manager down: read $(cat "$FAKE_STATE/user-reads") times"
-reset
-st "$B b"
-FAKE_USER_DOWN=100 run_rc
-(( r == 1 )) || fail "user manager never up: exit $r"
-grep -q "not confirmed: $S not active after 2 s" "$tmp/out" || fail "user manager never up message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with no user manager: $(events)"
-
-
-N=gamescope-session-plus@dap.service
-reset
-st "$B b" "$P p"
-echo "dap $N 4" > "$MICROOS_RUNDIR/session-current"
-MICROOS_BOOT_OK_HOLD=3 run || fail "current session held: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned with the current session held"
-[[ $(sort -u "$FAKE_STATE/user.log") == "systemctl --user show -p ActiveState,InvocationID,FragmentPath,DropInPaths $N" ]] ||
-  fail "current session unit query: $(sort -u "$FAKE_STATE/user.log")"
-(( $(cat "$FAKE_STATE/user-reads") >= 4 )) || fail "current session read $(cat "$FAKE_STATE/user-reads") times in the hold"
-[[ $(cat "$MICROOS_RUNDIR/deployments") == "booted=$B"$'\n'"confirmed=yes"$'\n'"rollback=yes" ]] ||
-  fail "deployments with a rollback: $(cat "$MICROOS_RUNDIR/deployments")"
-[[ $(stat -c %a "$MICROOS_RUNDIR/deployments") == 644 ]] || fail "deployments mode $(stat -c %a "$MICROOS_RUNDIR/deployments")"
-reset
-st "$B b"
-run || fail "pass with no rollback: $(cat "$tmp/out")"
-[[ $(cat "$MICROOS_RUNDIR/deployments") == "booted=$B"$'\n'"confirmed=yes"$'\n'"rollback=no" ]] ||
-  fail "deployments with no rollback: $(cat "$MICROOS_RUNDIR/deployments")"
-reset
-st "$B b"
-echo "recovery gamescope-session-plus@recovery.service 2" > "$MICROOS_RUNDIR/session-current"
-run_rc
-(( r == 1 )) || fail "recovery current: exit $r"
-grep -q "not confirmed: recovery is the current session after 2 s" "$tmp/out" || fail "recovery message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with recovery current: $(events)"
-[[ ! -e $FAKE_STATE/user-reads ]] || fail "recovery unit read"
-reset
-st "$B b"
-t0=$SECONDS
-FAKE_SWITCH_AT=3 FAKE_SWITCH_TO="steam $S 2" MICROOS_BOOT_OK_HOLD=4 MICROOS_BOOT_OK_WAIT=0 run || fail "switch in the hold: $(cat "$tmp/out")"
-grep -q "hold restarted: current session changed to steam" "$tmp/out" || fail "switch in the hold message: $(cat "$tmp/out")"
-(( SECONDS - t0 >= 6 )) || fail "hold not restarted after a switch: $((SECONDS - t0)) s"
-(( $(cat "$FAKE_STATE/user-reads") >= 8 )) || fail "switch in the hold: read $(cat "$FAKE_STATE/user-reads") times"
-is_pinned "$B" || fail "booted not pinned after a switch in the hold"
-reset
-st "$B b"
-FAKE_SWITCH_AT=2 FAKE_SWITCH_TO="recovery gamescope-session-plus@recovery.service 2" MICROOS_BOOT_OK_HOLD=4 run_rc
-(( r == 1 )) || fail "switch to recovery in the hold: exit $r"
-grep -q "hold restarted: recovery is the current session" "$tmp/out" || fail "switch to recovery message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned after a switch to recovery: $(events)"
-reset
-st "$B b"
-FAKE_USER_RESTART_AFTER=2 MICROOS_BOOT_OK_HOLD=3 run || fail "current session restarted in the hold: $(cat "$tmp/out")"
-grep -q "hold restarted: $S restarted" "$tmp/out" || fail "current session restart message: $(cat "$tmp/out")"
-(( $(cat "$FAKE_STATE/user-reads") >= 6 )) || fail "restart did not restart the hold: read $(cat "$FAKE_STATE/user-reads") times"
-is_pinned "$B" || fail "booted not pinned after a restart in the hold"
-reset
-st "$B b"
-rm -f "$MICROOS_RUNDIR/session-current"
-run_rc
-(( r == 1 )) || fail "no session-current: exit $r"
-grep -q "not confirmed: no session-current after 2 s" "$tmp/out" || fail "no session-current message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with no session-current: $(events)"
-( sleep 1.5; echo "steam $S 1" > "$MICROOS_RUNDIR/session-current" ) &
-MICROOS_BOOT_OK_WAIT=5 run || fail "session-current written late: $(cat "$tmp/out")"
-wait
-is_pinned "$B" || fail "booted not pinned after session-current came up"
-reset
-st "$B b"
-echo "steam $S 1 2" > "$MICROOS_RUNDIR/session-current"
-run || fail "session-current with the monotonic stamp: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned with the monotonic stamp"
-reset
-st "$B b"
-echo "steam $S 1" > "$tmp/current-target"
-ln -sf "$tmp/current-target" "$MICROOS_RUNDIR/session-current"
-run_rc
-(( r == 1 )) || fail "symlinked session-current: exit $r"
-grep -q "not confirmed: no session-current after 2 s" "$tmp/out" || fail "symlinked session-current message: $(cat "$tmp/out")"
-[[ ! -e $FAKE_STATE/user-reads ]] || fail "symlinked session-current followed"
-for bad in "steam ../x.service 1" "steam $S" "steam $S 1 x" "steam $S 1 2 3" "Steam $S 1"; do
-  reset
-  st "$B b"
-  echo "$bad" > "$MICROOS_RUNDIR/session-current"
-  run_rc
-  (( r == 1 )) || fail "session-current '$bad': exit $r"
-  [[ ! -e $FAKE_STATE/user-reads ]] || fail "session-current '$bad' used"
-done
-reset
-st "$B b"
-FAKE_USER_FRAGMENT=/home/micro/.config/systemd/user/gamescope-session-plus@.service run_rc
-(( r == 1 )) || fail "user fragment: exit $r"
-[[ $(grep -c "$S refused: FragmentPath '/home/micro/.config/systemd/user/gamescope-session-plus@.service'" "$tmp/out") == 1 ]] ||
-  fail "user fragment refusal not logged once: $(cat "$tmp/out")"
-grep -q "not confirmed: $S refused, unit not from /usr/lib or /etc after 2 s" "$tmp/out" || fail "user fragment message: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with a user fragment: $(events)"
-reset
-st "$B b"
-FAKE_USER_DROPINS="/usr/lib/systemd/user/gamescope-session-plus@.service.d/10-microos-track.conf /home/micro/.config/systemd/user/gamescope-session-plus@steam.service.d/override.conf" run_rc
-(( r == 1 )) || fail "user drop-in: exit $r"
-grep -q "$S refused: .*DropInPaths '.*/home/micro/" "$tmp/out" || fail "user drop-in refusal: $(cat "$tmp/out")"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned with a user drop-in: $(events)"
-reset
-st "$B b"
-FAKE_USER_HOME_READS=2 MICROOS_BOOT_OK_WAIT=4 run || fail "user fragment removed in the wait: $(cat "$tmp/out")"
-grep -q "$S refused" "$tmp/out" || fail "user fragment in the wait not logged: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned after the user fragment went away"
-reset
-st "$B b"
-FAKE_USER_FRAGMENT="" run_rc
-(( r == 1 )) || fail "no fragment: exit $r"
-reset
-st "$B b"
-FAKE_USER_DROPINS="/usr/lib/systemd/user/gamescope-session-plus@.service.d/10-microos-track.conf /etc/systemd/user/gamescope-session-plus@steam.service.d/10-x.conf" run ||
-  fail "drop-ins under /usr/lib and /etc: $(cat "$tmp/out")"
-is_pinned "$B" || fail "booted not pinned with drop-ins under /usr/lib and /etc"
-reset
-st "$B b"
-FAKE_USER_DROPINS="" run || fail "no drop-ins: $(cat "$tmp/out")"
-reset
-st "$B b"
-FAKE_USER_FRAGMENT=/home/micro/.config/systemd/user/foo.service MICROOS_BOOT_OK_USER_ACTIVE=foo.service run_rc
-(( r == 1 )) || fail "listed user unit with a user fragment: exit $r"
-grep -q "foo.service refused" "$tmp/out" || fail "listed user unit refusal: $(cat "$tmp/out")"
-reset
-st "$B b"
-FAKE_INACTIVE=display-manager.service run_rc
-(( r == 1 )) || fail "display manager inactive: exit $r"
-grep -q "not confirmed: display-manager.service not active after 2 s" "$tmp/out" || fail "display manager message: $(cat "$tmp/out")"
 reset
 st "$B b" "$P p"
 echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
@@ -325,7 +203,8 @@ run_rc
 (( r == 3 )) || fail "skip file naming the booted deployment: exit $r"
 [[ $(tail -n 1 "$tmp/out") == "microos-boot-ok: skipped once" ]] || fail "skip message: $(cat "$tmp/out")"
 [[ ! -e $MICROOS_STATEDIR/boot-ok-skip ]] || fail "skip file kept after a skip"
-[[ -z $(writes) && -z $(events) ]] || fail "pinned or baked on a skip: $(events)"
+[[ -z $(writes) && -z $(events) ]] || fail "pinned on a skip: $(events)"
+[[ ! -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 2" ]] || fail "skip confirmed the boot"
 [[ ! -e $MICROOS_STATEDIR/confirmed ]] || fail "confirmed written on a skip"
 [[ $(pins) == "$P" ]] || fail "boot-ok-pins changed on a skip: $(pins)"
 run || fail "pass after a skip: $(cat "$tmp/out")"
@@ -342,28 +221,6 @@ is_pinned "$B" || fail "booted not pinned after a skip mismatch"
 [[ $(pins) == "$B" ]] || fail "boot-ok-pins after a skip mismatch: $(pins)"
 
 reset
-st "$B b" "$P p"
-echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
-FAKE_BAK_FAIL=1 run_rc
-(( r == 1 )) || fail "BAK failure exit $r"
-is_pinned "$P" || fail "old pin dropped on a BAK failure"
-grep -q '^unpin' "$FAKE_STATE/events" && fail "unpin after a BAK failure"
-[[ $(pins) == "$P,$B" ]] || fail "boot-ok-pins after a BAK failure: $(pins)"
-: > "$FAKE_STATE/events"
-run || fail "pass after a BAK failure: $(cat "$tmp/out")"
-grep -q '^pin booted' "$FAKE_STATE/events" && fail "already pinned booted pinned again"
-is_pinned "$P" && fail "old pin kept after the pass"
-[[ $(pins) == "$B" ]] || fail "boot-ok-pins after the pass: $(pins)"
-
-reset
-st "$B b" "$P p"
-echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
-FAKE_BAK_WRONG=1 run_rc
-(( r == 1 )) || fail "wrong bake id exit $r"
-is_pinned "$P" || fail "unpinned after a wrong bake id"
-grep -q '^unpin' "$FAKE_STATE/events" && fail "unpin after a wrong bake id"
-
-reset
 st "$B b" "$P p" "$H p"
 echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
 run || fail "pass with a hand pin: $(cat "$tmp/out")"
@@ -377,29 +234,6 @@ st "$B b" "$H p"
 run || fail "pass after a hand pinned booted: $(cat "$tmp/out")"
 is_pinned "$H" || fail "hand pinned deployment unpinned by a later boot ok"
 [[ $(pins) == "$B" ]] || fail "boot-ok-pins after the later boot ok: $(pins)"
-
-reset
-st "$B b" "$P p" "$H p"
-echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
-FAKE_BAK_SLEEP=10 "$bootok" > "$tmp/out" 2>&1 &
-pid=$!
-for _ in $(seq 1 100); do
-  [[ -e $FAKE_STATE/bak-sleeping ]] && break
-  sleep 0.1
-done
-[[ -e $FAKE_STATE/bak-sleeping ]] || fail "the bake did not start"
-kill -TERM "$pid"
-wait "$pid" 2> /dev/null || true
-kill "$(cat "$FAKE_STATE/bak-sleeping")" 2> /dev/null || true
-{ is_pinned "$P" && is_pinned "$B" && is_pinned "$H"; } || fail "pins changed by a stop during the bake"
-[[ $(pins) == "$P,$B" ]] || fail "boot-ok-pins after a stop during the bake: $(pins)"
-st "$C b" "$B p" "$P p" "$H p"
-run || fail "pass after a stop: $(cat "$tmp/out")"
-is_pinned "$P" && fail "P still pinned after the next pass"
-is_pinned "$B" && fail "B still pinned after the next pass"
-is_pinned "$H" || fail "hand pin dropped after the next pass"
-is_pinned "$C" || fail "C not pinned"
-[[ $(pins) == "$C" ]] || fail "boot-ok-pins after the next pass: $(pins)"
 
 reset
 st "$B b" "$P p"
@@ -447,7 +281,108 @@ echo "$B" > "$MICROOS_STATEDIR/boot-ok-pins"
 echo "$B" > "$MICROOS_STATEDIR/confirmed"
 run || fail "pass with nothing to do: $(cat "$tmp/out")"
 [[ -z $(writes) ]] || fail "pin or unpin with nothing to do: $(writes)"
-[[ $(events) == "bak $B confirmed=$B" ]] || fail "--bak not called with nothing to do: $(events)"
+[[ -z $(events) ]] || fail "events with nothing to do: $(events)"
+
+reset
+st "$B b"
+run || fail "RAM boot: $(cat "$tmp/out")"
+has "RAM boot of $ID" || fail "RAM boot not detected: $(cat "$tmp/out")"
+[[ $(attempts) == "$ID 0" ]] || fail "RAM boot counter: $(attempts)"
+[[ $(sdam) == 01 ]] || fail "RAM boot preset byte $(sdam)"
+[[ $(cat "$MICROOS_RUNDIR/boot-confirmed") == "$B" ]] || fail "RAM boot boot-confirmed"
+has "no stub, status word 0x0" || fail "missing stub not reported: $(cat "$tmp/out")"
+[[ $(memword 0x2040) == 0 ]] || fail "disarm written with no stub"
+[[ -z $(slotlog) ]] || fail "RAM boot ran microos-slot: $(slotlog)"
+[[ $(tail -n 1 "$tmp/out") == "microos-boot-ok: confirmed $B" ]] || fail "RAM boot last line: $(tail -n 1 "$tmp/out")"
+reset
+st "$B b"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+run || fail "RAM boot with slot writes on: $(cat "$tmp/out")"
+[[ -z $(slotlog) ]] || fail "RAM boot with slot writes on ran microos-slot: $(slotlog)"
+
+reset
+st "$B b"
+bootimg "root=PARTLABEL=microos rootwait microos.id=$ID loglevel=4"
+run || fail "flash boot: $(cat "$tmp/out")"
+has "flash boot of $ID" || fail "flash boot not detected: $(cat "$tmp/out")"
+has "slot writes are off, boot_b not marked good" || fail "slot writes off not reported: $(cat "$tmp/out")"
+[[ -z $(slotlog) && $(attempts) == "$ID 0" && $(sdam) == 01 ]] || fail "flash boot, slot off: $(slotlog), $(attempts), $(sdam)"
+reset
+st "$B b"
+bootimg "root=PARTLABEL=microos microos.id=$ID"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+run || fail "flash boot with slot writes on: $(cat "$tmp/out")"
+[[ $(slotlog) == "microos-slot mark-good" ]] || fail "mark-good not run: $(slotlog)"
+has "boot_b marked good" || fail "mark-good not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+bootimg "root=PARTLABEL=microos microos.id=$ID"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+FAKE_SLOT_RC=1 run || fail "flash boot with a failing microos-slot: $(cat "$tmp/out")"
+has "microos-slot mark-good failed" || fail "mark-good failure not reported: $(cat "$tmp/out")"
+[[ -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "no boot-confirmed after a mark-good failure"
+reset
+st "$B b"
+bootimg "root=PARTLABEL=microos microos.id=$ID"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+MICROOS_SLOT=$tmp/missing run || fail "flash boot with no microos-slot: $(cat "$tmp/out")"
+has "$tmp/missing is missing, boot_b not marked good" || fail "missing microos-slot not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+long=$(printf 'x%.0s' {1..520})
+bootimg "root=PARTLABEL=microos $long microos.id=$ID"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+run || fail "flash boot with extra_cmdline: $(cat "$tmp/out")"
+[[ $(slotlog) == "microos-slot mark-good" ]] || fail "id in extra_cmdline not found: $(cat "$tmp/out")"
+reset
+st "$B b"
+bootimg "root=PARTLABEL=microos microos.id=$ID" 3
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+run || fail "v3 boot_b: $(cat "$tmp/out")"
+has "header version 3, cmdline not read" && has "RAM boot of $ID" || fail "v3 boot_b: $(cat "$tmp/out")"
+[[ -z $(slotlog) ]] || fail "v3 boot_b ran microos-slot"
+reset
+st "$B b"
+rm "$MICROOS_BOOT_B"
+run || fail "no boot_b: $(cat "$tmp/out")"
+has "RAM boot of $ID" || fail "no boot_b: $(cat "$tmp/out")"
+reset
+st "$B b"
+echo "root=PARTLABEL=microos" > "$tmp/proc-cmdline"
+run || fail "no microos.id: $(cat "$tmp/out")"
+[[ $(attempts) == "$ID 2" ]] || fail "counter changed with no microos.id: $(attempts)"
+
+reset
+st "$B b"
+stub 2 7
+responder &
+resp=$!
+run || fail "stub present: $(cat "$tmp/out")"
+wait "$resp" || true
+[[ $(memword 0x2040) == $(( 0x4449534d )) ]] || fail "disarm word $(memword 0x2040)"
+has "stub stopped at 9 s" || fail "stub stop not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+stub 2 7
+t0=$SECONDS
+run || fail "stub that does not stop: $(cat "$tmp/out")"
+(( SECONDS - t0 >= 2 )) || fail "stub wait shorter than MICROOS_STUB_WAIT"
+has "stub still running at 7 s after the disarm, it resets at 1200 s" || fail "running stub not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+stub 4 $(( 0xfffffffe ))
+run || fail "stub refused: $(cat "$tmp/out")"
+has "stub CPU_ON was refused, PSCI 4294967294" || fail "refused stub not reported: $(cat "$tmp/out")"
+[[ $(memword 0x2040) == 0 ]] || fail "disarm written for a refused stub"
+reset
+st "$B b"
+MICROOS_DEVMEM=$tmp/nomem run || fail "no devmem: $(cat "$tmp/out")"
+has "stub words not reachable through $tmp/nomem" || fail "devmem failure not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+rm "$MICROOS_NVMEM_ROOT/spmi_sdam1/of_node"
+run || fail "no SDAM: $(cat "$tmp/out")"
+has "fastboot preset not cleared, no SDAM nvram@7100" || fail "missing SDAM not reported: $(cat "$tmp/out")"
 
 export MICROOS_BOOT=$tmp/bootfs MICROOS_CMDLINE=$tmp/cmdline MICROOS_BOOTID=$tmp/bootid
 log=$MICROOS_BOOT/microos/shutdown.log

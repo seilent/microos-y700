@@ -3,87 +3,26 @@ set -euo pipefail
 
 me=microos-boot-ok
 die() { echo "$me: $*" >&2; exit 1; }
+say() { echo "$me: $*" >&2; }
 
 rundir=${MICROOS_RUNDIR:-/run/microos}
 statedir=${MICROOS_STATEDIR:-/var/lib/microos}
 esp=${MICROOS_ESP:-/boot/efi}
 conf=${MICROOS_BOOT_OK_CONF:-/usr/lib/microos/boot-ok.conf}
-bootimg=${MICROOS_BOOTIMG_UPDATE:-/usr/libexec/microos/microos-bootimg-update}
+slotconf=${MICROOS_SLOT_CONF:-/usr/lib/microos/slot.conf}
+stubconf=${MICROOS_STUB_CONF:-/usr/lib/microos/stub.conf}
+sdamlib=${MICROOS_SDAM_LIB:-/usr/libexec/microos/microos-sdam}
+slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
+cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
+bootb=${MICROOS_BOOT_B:-/dev/disk/by-partlabel/boot_b}
+devmem=${MICROOS_DEVMEM:-/dev/mem}
+membase=${MICROOS_DEVMEM_BASE:-0}
 lockwait=${MICROOS_BOOT_OK_LOCK_WAIT:-1800}
 pins=$statedir/boot-ok-pins
 skip=$statedir/boot-ok-skip
 
 [[ -r $conf ]] || die "missing $conf"
 . "$conf"
-
-declare -A inv=() refused=()
-user_unit() {
-  local out uid gid frag drop p
-  us="" uinv=""
-  uid=$(id -u "$MICROOS_BOOT_OK_USER" 2> /dev/null) || return 0
-  gid=$(id -g "$MICROOS_BOOT_OK_USER" 2> /dev/null) || return 0
-  out=$(setpriv --reuid="$uid" --regid="$gid" --init-groups --no-new-privs env -i XDG_RUNTIME_DIR="/run/user/$uid" \
-    systemctl --user show -p ActiveState,InvocationID,FragmentPath,DropInPaths "$1" < /dev/null 2> /dev/null) || return 0
-  frag=$(sed -n 's/^FragmentPath=//p' <<< "$out")
-  drop=$(sed -n 's/^DropInPaths=//p' <<< "$out")
-  us=$(sed -n 's/^ActiveState=//p' <<< "$out")
-  uinv=$(sed -n 's/^InvocationID=//p' <<< "$out")
-  [[ $frag == /usr/lib/systemd/user/* ]] || us=refused
-  for p in $drop; do
-    [[ $p == /usr/lib/* || $p == /etc/* ]] || us=refused
-  done
-  if [[ $us == refused && -z ${refused[$1]:-} ]]; then
-    refused[$1]=1
-    echo "$me: $1 refused: FragmentPath '$frag', DropInPaths '$drop' not under /usr/lib or /etc" >&2
-  fi
-}
-
-unit_why() {
-  if [[ $us == refused ]]; then
-    why="$1 refused, unit not from /usr/lib or /etc"
-  else
-    why="$1 not active"
-  fi
-}
-
-users_up() {
-  local u
-  for u in ${MICROOS_BOOT_OK_USER_ACTIVE:-}; do
-    user_unit "$u"
-    if [[ $us != active || -z $uinv ]]; then
-      unit_why "$u"
-      return 1
-    fi
-    inv[$u]=$uinv
-  done
-}
-
-units_ok() {
-  local u
-  for u in $MICROOS_BOOT_OK_FAILED; do
-    if systemctl is-failed --quiet "$u"; then
-      echo "$me: not confirmed: $u failed" >&2
-      return 1
-    fi
-  done
-  for u in $MICROOS_BOOT_OK_ACTIVE; do
-    if [[ $(systemctl show -p ConditionResult --value "$u") == yes ]] && ! systemctl is-active --quiet "$u"; then
-      echo "$me: not confirmed: $u is not active" >&2
-      return 1
-    fi
-  done
-  for u in ${MICROOS_BOOT_OK_USER_ACTIVE:-}; do
-    user_unit "$u"
-    if [[ $us != active ]]; then
-      echo "$me: not confirmed: $u is not active" >&2
-      return 1
-    fi
-    if [[ $uinv != "${inv[$u]}" ]]; then
-      echo "$me: not confirmed: $u restarted" >&2
-      return 1
-    fi
-  done
-}
 
 write() {
   local f=$1 t
@@ -127,70 +66,42 @@ if [[ -e $skip ]]; then
   echo "$me: boot-ok-skip names '$want', booted $booted, not skipped" >&2
 fi
 
-read_current() {
-  local line
-  [[ -f $rundir/session-current ]] || return 1
-  line=$(dd if="$rundir/session-current" iflag=nofollow bs=4096 count=1 status=none 2> /dev/null) || return 1
-  [[ $line =~ ^[a-z0-9-]+\ [A-Za-z0-9@._-]+\.service\ [0-9]+(\ [0-9]+)?$ ]] || return 1
-  session=$line
-}
-
-session_up() {
-  why="display-manager.service not active"
-  systemctl is-active --quiet display-manager.service || return 1
-  why="no session-current"
-  read_current || return 1
-  read -r name unit _ <<< "$session"
-  why="recovery is the current session"
-  [[ $name != recovery ]] || return 1
-  user_unit "$unit"
-  id=$uinv
-  unit_why "$unit"
-  [[ $us == active && -n $id ]]
-}
-
-session_held() {
-  [[ -z ${MICROOS_BOOT_OK_USER_ACTIVE:-} ]] || return 0
-  session_up || return 1
-  why="current session changed to $name"
-  [[ $session == "$held_session" ]] || return 1
-  why="$unit restarted"
-  [[ $id == "$held_id" ]]
-}
-
-ready() {
-  why="$MICROOS_BOOT_OK_TARGET not active"
-  systemctl is-active --quiet "$MICROOS_BOOT_OK_TARGET" || return 1
-  if [[ -n ${MICROOS_BOOT_OK_USER_ACTIVE:-} ]]; then
-    users_up
-    return
+health() {
+  local s u bad=""
+  s=$(systemctl is-system-running 2> /dev/null) || true
+  if [[ $s == degraded ]]; then
+    while read -r u _; do
+      if [[ -n $u && " $MICROOS_BOOT_OK_ALLOW " != *" $u "* ]]; then
+        bad+=" $u"
+      fi
+    done < <(systemctl list-units --state=failed --plain --no-legend --full 2> /dev/null)
+    if [[ -n $bad ]]; then
+      why="failed:$bad"
+      return 1
+    fi
+  elif [[ $s != running ]]; then
+    why="system ${s:-unknown}"
+    return 1
   fi
-  session_up || return 1
-  held_session=$session held_id=$id
-}
-
-waited=0
-wait_ready() {
-  until ready; do
-    (( waited < MICROOS_BOOT_OK_WAIT )) || die "not confirmed: $why after $MICROOS_BOOT_OK_WAIT s"
-    sleep "$MICROOS_BOOT_OK_STEP"
-    waited=$(( waited + MICROOS_BOOT_OK_STEP ))
+  for u in $MICROOS_BOOT_OK_ACTIVE; do
+    if [[ $(systemctl show -p ConditionResult --value "$u") == yes ]] && ! systemctl is-active --quiet "$u"; then
+      why="$u is not active"
+      return 1
+    fi
   done
 }
 
-wait_ready
+waited=0
+until health; do
+  (( waited < MICROOS_BOOT_OK_WAIT )) || die "not confirmed: $why after $MICROOS_BOOT_OK_WAIT s"
+  sleep "$MICROOS_BOOT_OK_STEP"
+  waited=$(( waited + MICROOS_BOOT_OK_STEP ))
+done
 held=0
-while :; do
-  units_ok || exit 1
-  if ! session_held; then
-    echo "$me: hold restarted: $why" >&2
-    wait_ready
-    held=0
-    continue
-  fi
-  (( held < MICROOS_BOOT_OK_HOLD )) || break
+while (( held < MICROOS_BOOT_OK_HOLD )); do
   sleep "$MICROOS_BOOT_OK_STEP"
   held=$(( held + MICROOS_BOOT_OK_STEP ))
+  health || die "not confirmed: $why after $held s of the hold"
 done
 
 read_status
@@ -235,15 +146,6 @@ write "$statedir/confirmed" "$booted"
 rollback=no
 ! jq -e 'any(.deployments[]; (.booted or .staged) | not)' <<< "$status" > /dev/null || rollback=yes
 write "$rundir/deployments" "booted=$booted" confirmed=yes "rollback=$rollback"
-
-out=$("$bootimg" --bak "$booted") || die "KERNEL.BAK not baked from $booted, pins kept"
-read -r word deploy bake <<< "$(tail -n 1 <<< "$out")"
-stamp=""
-if [[ -f $esp/.microos-bootimg-bak.id ]]; then
-  stamp=$(< "$esp/.microos-bootimg-bak.id")
-fi
-[[ $word == bak && $deploy == "$booted" && -n $bake && $bake == "$stamp" ]] ||
-  die "KERNEL.BAK does not hold $booted, pins kept"
 
 pinset() {
   jq -r '.deployments[] | select(.pinned) | "\(.checksum).\(.serial)"' <<< "$status" | LC_ALL=C sort | paste -sd' '
@@ -304,5 +206,142 @@ if (( was_listed )); then
 else
   write "$pins"
 fi
+id=""
+read -ra words < "$cmdline" || true
+for w in "${words[@]}"; do
+  [[ $w != microos.id=* ]] || id=${w#microos.id=}
+done
+
+flash_boot() {
+  local magic ver a="" b=""
+  if [[ -z $id ]]; then
+    say "no microos.id on the cmdline"
+    return 1
+  fi
+  if [[ ! -r $bootb ]]; then
+    say "$bootb is not readable"
+    return 1
+  fi
+  magic=$(dd if="$bootb" bs=8 count=1 status=none 2> /dev/null | tr -d '\0') || true
+  if [[ $magic != ANDROID! ]]; then
+    say "$bootb has no boot image header"
+    return 1
+  fi
+  ver=$(od -An -tu4 -j40 -N4 "$bootb" | tr -d ' ')
+  if [[ ! $ver =~ ^[0-2]$ ]]; then
+    say "$bootb header version ${ver:-unknown}, cmdline not read"
+    return 1
+  fi
+  IFS= read -r -d '' a < <(dd if="$bootb" bs=32 skip=2 count=16 status=none) || true
+  IFS= read -r -d '' b < <(dd if="$bootb" bs=32 skip=19 count=32 status=none) || true
+  [[ " $a$b " == *" microos.id=$id "* ]]
+}
+
+flash=0
+if flash_boot; then
+  flash=1
+  say "flash boot of $id"
+else
+  say "RAM boot of ${id:-no microos.id}"
+fi
+
+if [[ -n $id ]]; then
+  f=$esp/microos/boot-attempts
+  if mkdir -p "$esp/microos" && echo "$id 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; then
+    say "attempt counter of $id reset"
+  else
+    say "cannot reset $f"
+  fi
+fi
+
+if [[ -r $sdamlib ]]; then
+  . "$sdamlib"
+  if sdam_find && sdam_put clear; then
+    say "fastboot preset cleared in ${sdam##*/}"
+  else
+    say "fastboot preset not cleared, no SDAM nvram@7100"
+  fi
+else
+  say "missing $sdamlib, fastboot preset not cleared"
+fi
+
+disarm() {
+  python3 - "$devmem" "$membase" "$MICROOS_STUB_STATUS" "$MICROOS_STUB_DISARM" "$MICROOS_STUB_MAGIC" \
+    "$MICROOS_STUB_SIGNATURE" "$MICROOS_STUB_ARMED" "$MICROOS_STUB_RUNNING" "$MICROOS_STUB_STOPPED" \
+    "$MICROOS_STUB_REFUSED" "${MICROOS_STUB_WAIT:-5}" << 'EOF'
+import mmap
+import os
+import sys
+import time
+
+path = sys.argv[1]
+base, status, disarm, magic, sig, armed, running, stopped, refused = (int(a, 0) for a in sys.argv[2:11])
+wait = float(sys.argv[11])
+lo = (min(status, disarm) - base) // mmap.PAGESIZE * mmap.PAGESIZE
+hi = max(status, disarm) + 8 - base
+fd = os.open(path, os.O_RDWR | os.O_SYNC)
+m = mmap.mmap(fd, hi - lo, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=lo)
+w = memoryview(m).cast("I")
+
+
+def word(a):
+    return w[(a - base - lo) // 4]
+
+
+def state():
+    s = word(status)
+    return s >> 16, s & 0xFFFF, word(status + 4)
+
+
+g, st, n = state()
+if g != sig or st not in (armed, running, stopped, refused):
+    print("absent", hex(word(status)), n)
+    sys.exit(0)
+if st == refused:
+    print("refused", st, n)
+    sys.exit(0)
+if st != stopped:
+    w[(disarm - base - lo) // 4] = magic
+    end = time.monotonic() + wait
+    while st != stopped and time.monotonic() < end:
+        time.sleep(0.1)
+        g, st, n = state()
+print("stopped" if st == stopped else "running", st, n)
+EOF
+}
+
+if [[ -r $stubconf ]]; then
+  . "$stubconf"
+  if r=$(disarm 2>&1); then
+    read -r res st n <<< "$r"
+    case $res in
+      absent) say "no stub, status word $st" ;;
+      refused) say "stub CPU_ON was refused, PSCI $n" ;;
+      stopped) say "stub stopped at $n s" ;;
+      *) say "stub still running at $n s after the disarm, it resets at $MICROOS_STUB_DEADLINE s" ;;
+    esac
+  else
+    say "stub words not reachable through $devmem: ${r##*$'\n'}"
+  fi
+else
+  say "missing $stubconf, stub not disarmed"
+fi
+
+MICROOS_SLOT_WRITE=0
+if [[ -r $slotconf ]]; then
+  . "$slotconf"
+fi
+if (( flash )); then
+  if [[ $MICROOS_SLOT_WRITE != 1 ]]; then
+    say "slot writes are off, boot_b not marked good"
+  elif [[ ! -x $slot ]]; then
+    say "$slot is missing, boot_b not marked good"
+  elif "$slot" mark-good; then
+    say "boot_b marked good"
+  else
+    say "microos-slot mark-good failed"
+  fi
+fi
+
 write "$rundir/boot-confirmed" "$booted"
 echo "$me: confirmed $booted"
