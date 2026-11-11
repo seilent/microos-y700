@@ -89,6 +89,7 @@ kept=(
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/modprobe.d/microos-y700-rtc.conf
   /usr/lib/udev/rules.d/59-microos-y700-input.rules
+  /usr/lib/udev/rules.d/60-microos-backlight.rules
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf
@@ -243,7 +244,7 @@ sys.exit(b"Lenovo Legion Y700 (2025) / TB321FU\0" not in open(sys.argv[1], "rb")
 PY
 [[ $(< /etc/gamescope-session-plus/sessions.d/steam) == $'short_session_recover() {\n  echo "microos: short Steam session, recovery is off" >&2\n}' ]] \
   || fail "/etc/gamescope-session-plus/sessions.d/steam"
-for h in steamos-update steamos-select-branch jupiter-biosupdate steamos-set-timezone; do
+for h in steamos-update steamos-select-branch jupiter-biosupdate steamos-set-timezone steamos-priv-write; do
   [[ -x /usr/bin/steamos-polkit-helpers/$h ]] || fail "steamos-polkit-helpers/$h missing"
 done
 for h in steam steamos-update steamos-select-branch steamos-session-select steamos-mandatory-update jupiter-biosupdate \
@@ -280,6 +281,11 @@ rules=/usr/lib/udev/rules.d/59-microos-y700-input.rules
 grep -qxF 'ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="0 1 0 -1 0 1"' "$rules" || fail "touch calibration rule"
 grep -qF 'ATTRS{name}=="NVTCapacitivePen", ENV{.HAVE_HWDB_PROPERTIES}="1", ENV{EVDEV_ABS_00}="::135", ENV{EVDEV_ABS_01}="::135"' "$rules" || fail "pen resolution rule"
 udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
+udevadm verify --no-style /usr/lib/udev/rules.d/60-microos-backlight.rules >/dev/null 2>&1 || fail "60-microos-backlight.rules does not verify"
+pw=/usr/bin/steamos-polkit-helpers/steamos-priv-write
+[[ $(stat -c %a "$pw") == 755 ]] || fail "$pw is not 755"
+! "$pw" /etc/passwd 1 2>/dev/null || fail "$pw writes outside backlight brightness"
+! "$pw" /sys/class/backlight/none/brightness 1 2>/dev/null || fail "$pw accepts a missing backlight"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
   drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/input/touchscreen/nt36523/nt36523_ts \
   drivers/power/supply/qcom_battmgr; do
@@ -353,7 +359,7 @@ done
 grep -q '^micro:x:1000:1000:' /etc/passwd || fail "micro is not in the image /etc/passwd"
 [[ $(id -u micro):$(id -g micro) == 1000:1000 ]] || fail "micro is not 1000:1000"
 groups=$(id -nG micro)
-for g in wheel systemd-journal; do
+for g in wheel systemd-journal video; do
   [[ " $groups " == *" $g "* ]] || fail "micro is not in $g"
 done
 [[ $(getent passwd micro | cut -d: -f6,7) == /var/home/micro:/bin/bash ]] || fail "micro home or shell"
