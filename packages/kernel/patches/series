@@ -7,3 +7,7 @@
 0013-iommu-arm-smmu-qcom-Add-SM8650-MDSS-compatible-to-cl.patch
 0007-dt-bindings-input-touchscreen-Add-Novatek-NT36523-SP.patch
 0008-Input-add-Novatek-NT36523-SPI-touchscreen-driver.patch
+0009-dt-bindings-input-awinic-aw86927-Add-AW86937.patch
+0010-Input-aw86927-add-support-for-AW86937.patch
+0011-dt-bindings-usb-Add-Parade-PS5169-USB-C-redriver.patch
+0012-usb-typec-mux-Add-Parade-PS5169-redriver-driver.patch
