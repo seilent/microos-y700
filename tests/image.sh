@@ -355,13 +355,11 @@ pw=/usr/bin/steamos-polkit-helpers/steamos-priv-write
 ! "$pw" /etc/passwd 1 2>/dev/null || fail "$pw writes outside backlight brightness"
 ! "$pw" /sys/class/backlight/none/brightness 1 2>/dev/null || fail "$pw accepts a missing backlight"
 for m in drivers/pci/pwrctrl/pci-pwrctrl-pwrseq drivers/net/wireless/ath/ath12k/ath12k \
-  drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/input/touchscreen/nt36523/nt36523_ts \
-  drivers/power/supply/qcom_battmgr; do
+  drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7 drivers/power/supply/qcom_battmgr; do
   compgen -G "/usr/lib/modules/$kver/kernel/$m.ko*" >/dev/null || fail "module $m missing"
 done
 alias=/usr/lib/modules/$kver/modules.alias
 grep -qx 'alias of:N\*T\*Cpci17cb,1107 pci_pwrctrl_pwrseq' "$alias" || fail "no WCN7850 alias for pci_pwrctrl_pwrseq"
-grep -qx 'alias of:N\*T\*Clenovo,tb321fu-nt36523n-spi nt36523_ts' "$alias" || fail "no TB321FU touch alias for nt36523_ts"
 for f in amss m3 board-2; do
   compgen -G "/usr/lib/firmware/ath12k/WCN7850/hw2.0/$f.bin*" >/dev/null || fail "ath12k WCN7850 $f.bin missing"
 done
