@@ -37,7 +37,7 @@ EBUSY = 16
 ENODEV = 19
 EROFS = 30
 
-MOTORS = {"left": "aw86937-haptics-left", "right": "aw86937-haptics-right"}
+MOTORS = {"left": "vibrator@5b", "right": "vibrator@5a"}
 BOTH = ("left", "right")
 PULSE_SIDES = {0: ("right",), 1: ("left",), 2: BOTH}
 CMD_SIDES = {0: ("left",), 1: ("right",), 2: BOTH}
@@ -156,11 +156,17 @@ def scan():
     found = {}
     for entry in sorted(os.listdir("/sys/class/input")):
         if entry.startswith("event"):
+            dev = f"/dev/input/{entry}"
             try:
                 with open(f"/sys/class/input/{entry}/device/name") as f:
-                    found.setdefault(f.read().strip(), f"/dev/input/{entry}")
+                    found.setdefault(f.read().strip(), dev)
             except OSError:
                 pass
+            try:
+                node = os.readlink(f"/sys/class/input/{entry}/device/device/of_node")
+            except OSError:
+                continue
+            found.setdefault(os.path.basename(node), dev)
     return found
 
 
