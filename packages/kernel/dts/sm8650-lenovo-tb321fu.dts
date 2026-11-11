@@ -66,6 +66,22 @@
 						remote-endpoint = <&usb_1_dwc3_hs>;
 					};
 				};
+
+				port@1 {
+					reg = <1>;
+
+					pmic_glink_ss_in: endpoint {
+						remote-endpoint = <&redriver_ss_out>;
+					};
+				};
+
+				port@2 {
+					reg = <2>;
+
+					pmic_glink_sbu: endpoint {
+						remote-endpoint = <&fsa4480_sbu_mux>;
+					};
+				};
 			};
 		};
 
@@ -411,7 +427,43 @@
 		compatible = "parade,ps5169";
 		reg = <0x30>;
 
-		status = "disabled";
+		orientation-switch;
+		retimer-switch;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				redriver_ss_out: endpoint {
+					remote-endpoint = <&pmic_glink_ss_in>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				redriver_ss_in: endpoint {
+					remote-endpoint = <&usb_dp_qmpphy_out>;
+				};
+			};
+		};
+	};
+
+	typec-mux@43 {
+		compatible = "fcs,fsa4480";
+		reg = <0x43>;
+
+		mode-switch;
+		orientation-switch;
+
+		port {
+			fsa4480_sbu_mux: endpoint {
+				remote-endpoint = <&pmic_glink_sbu>;
+			};
+		};
 	};
 
 	usb_hs_repeater: redriver@4f {
@@ -425,6 +477,34 @@
 		reset-gpios = <&pm8550vs_c_gpios 4 GPIO_ACTIVE_LOW>;
 
 		pinctrl-0 = <&usb_hs_repeater_reset>;
+		pinctrl-names = "default";
+	};
+};
+
+&i2c7 {
+	clock-frequency = <1000000>;
+
+	status = "okay";
+
+	vibrator@5a {
+		compatible = "awinic,aw86937", "awinic,aw86927";
+		reg = <0x5a>;
+
+		interrupts-extended = <&tlmm 92 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 127 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&vib_r_reset_default>;
+		pinctrl-names = "default";
+	};
+
+	vibrator@5b {
+		compatible = "awinic,aw86937", "awinic,aw86927";
+		reg = <0x5b>;
+
+		interrupts-extended = <&tlmm 88 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 119 GPIO_ACTIVE_LOW>;
+
+		pinctrl-0 = <&vib_l_reset_default>;
 		pinctrl-names = "default";
 	};
 };
@@ -748,6 +828,18 @@
 		bias-pull-up;
 	};
 
+	vib_l_reset_default: vib-l-reset-default-state {
+		pins = "gpio119";
+		function = "gpio";
+		bias-pull-up;
+	};
+
+	vib_r_reset_default: vib-r-reset-default-state {
+		pins = "gpio127";
+		function = "gpio";
+		bias-pull-up;
+	};
+
 	wlan_en: wlan-en-state {
 		pins = "gpio16";
 		function = "gpio";
@@ -818,6 +910,10 @@
 	vdda-pll-supply = <&vreg_l3i_1p2>;
 
 	status = "okay";
+};
+
+&usb_dp_qmpphy_out {
+	remote-endpoint = <&redriver_ss_in>;
 };
 
 &xo_board {
