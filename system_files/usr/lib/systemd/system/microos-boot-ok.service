@@ -1,7 +1,7 @@
 [Unit]
 Description=Confirm the booted deployment and pin it
 ConditionPathExists=/run/ostree-booted
-After=multi-user.target microos-bootimg-regen.service ostree-finalize-staged.service
+After=multi-user.target ostree-finalize-staged.service
 RequiresMountsFor=/var/lib/microos /boot /boot/efi
 
 [Service]

@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-printf 'umount %s\n' "$*" >> "$STUB_LOG"
-find "$1" -mindepth 1 -delete

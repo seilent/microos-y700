@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-printf 'blockdev %s\n' "$*" >> "$STUB_LOG"

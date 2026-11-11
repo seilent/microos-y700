@@ -203,12 +203,6 @@ jobs:
           fi
           podman image inspect --format '{{.Size}}' "$IMAGE:$TAG" | awk '{ printf "image %.2f GB\n", $1 / 1e9 }'
 
-      - name: InputPlumber config
-        run: |
-          podman run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/pkgs/inputplumber:/rpms:ro" \
-            registry.fedoraproject.org/fedora:44@sha256:1ff9eb02e4e2d7fb1175becac7139b2960c4fdcccedce81c86ec25b98ef3124d \
-            sh -c 'dnf -yq --setopt=install_weak_deps=False install cpio python3-jsonschema python3-pyyaml && /repo/tests/inputplumber-config.sh /rpms'
-
       - name: steamos-manager config
         run: |
           podman run --rm -v "$PWD:/repo:ro" "$FEDORA" \
@@ -257,12 +251,9 @@ jobs:
         if: steps.testcache.outputs.cache-hit != 'true'
         run: |
           podman run --rm -v "$PWD:/repo:ro" "$FEDORA" \
-            sh -c 'dnf -yq --setopt=install_weak_deps=False install python3-gobject python3-evdev dbus-daemon util-linux systemd-udev && /repo/tests/powerd.sh && /repo/tests/vpower.sh && /repo/tests/hotkeyd.sh && /repo/tests/sleep.sh && /repo/tests/audio-policy.sh && /repo/tests/steamos-manager-policy.sh && /repo/tests/slpi-sensors.sh && /repo/tests/hexagonrpcd-sleep.sh && /repo/tests/dp-audio.sh && /repo/tests/bt-address.sh && /repo/tests/bt-reconnect.sh && /repo/tests/splash-quit.sh && /repo/tests/splash-switch.sh && /repo/tests/splash-gate.sh && /repo/tests/shm-reap.sh && /repo/tests/steam-compat.sh && /repo/tests/proton-hook.sh && /repo/tests/lsfg-detect.sh'
+            sh -c 'dnf -yq --setopt=install_weak_deps=False install python3-gobject python3-evdev dbus-daemon util-linux systemd-udev && /repo/tests/powerd.sh && /repo/tests/vpower.sh && /repo/tests/hotkeyd.sh && /repo/tests/sleep.sh && /repo/tests/audio-policy.sh && /repo/tests/steamos-manager-policy.sh && /repo/tests/hexagonrpcd-sleep.sh && /repo/tests/bt-address.sh && /repo/tests/bt-reconnect.sh && /repo/tests/splash-quit.sh && /repo/tests/splash-switch.sh && /repo/tests/splash-gate.sh && /repo/tests/shm-reap.sh && /repo/tests/steam-compat.sh && /repo/tests/proton-hook.sh && /repo/tests/lsfg-detect.sh'
           mkdir -p "$RUNNER_TEMP/testok"
           date -u > "$RUNNER_TEMP/testok/passed"
-
-      - name: USB display units
-        run: tests/usb-display-units.sh
 
       - name: Test
         env:
@@ -276,7 +267,6 @@ jobs:
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootimg.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootok.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/update.sh
-          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/audio.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/session.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/microos-session.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-launcher.sh

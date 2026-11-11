@@ -1,2 +1,0 @@
-SUBSYSTEM=="remoteproc", ATTR{name}=="slpi", TAG+="systemd", ENV{SYSTEMD_WANTS}+="microos-slpi-sensors.service"
-SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp", GROUP="hexagonrpc", MODE="0660", TAG+="systemd", ENV{SYSTEMD_WANTS}+="microos-hexagonrpcd.service"
