@@ -682,7 +682,7 @@
 };
 
 &spi4 {
-	status = "disabled";
+	status = "okay";
 
 	touchscreen: touchscreen@0 {
 		compatible = "novatek,nt36523-ts";
@@ -691,9 +691,21 @@
 		interrupts-extended = <&tlmm 162 IRQ_TYPE_EDGE_RISING>;
 		reset-gpios = <&tlmm 161 GPIO_ACTIVE_LOW>;
 
+		pinctrl-0 = <&ts_irq_default>, <&ts_reset_default>;
+		pinctrl-names = "default";
+
 		spi-max-frequency = <9600000>;
 
 		firmware-name = "qcom/sm8650/lenovo/tb321fu/novatek_ts_boe_fw.bin";
+
+		panel = <&display_panel>;
+
+		touchscreen-size-x = <16000>;
+		touchscreen-size-y = <25600>;
+		touchscreen-x-mm = <118>;
+		touchscreen-y-mm = <190>;
+		touchscreen-inverted-x;
+		touchscreen-swapped-x-y;
 	};
 };
 
@@ -720,6 +732,20 @@
 		function = "gpio";
 		drive-strength = <8>;
 		bias-disable;
+	};
+
+	ts_irq_default: ts-irq-default-state {
+		pins = "gpio162";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	ts_reset_default: ts-reset-default-state {
+		pins = "gpio161";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
 	};
 
 	wlan_en: wlan-en-state {
