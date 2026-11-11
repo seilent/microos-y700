@@ -5,7 +5,7 @@ me=y700-install-images
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 helper=localhost/microos-y700-install
-usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg]"
+usage="usage: $me --image <repo@sha256:digest> --channel <tag> --vendor-fw <vendor-firmware.tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --authorized-keys <file> --work <dir> --out <dir> [--key <cosign.pub>] [--panel boe|csot] [--size <bytes>] [--f1] [--bootimg <spec>]... [--no-bootimg] [--wifi <name>.nmconnection] [--wlan-board bdwlan.e<xx>]"
 root_part=726392975360
 efi_part=1073741824
 f1_set=("stub1 1" "stub1f slota gptdump" "stub1f slota bootloader" "stub1f slota panic" "stub1f slota emergency"
@@ -14,11 +14,14 @@ vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn 
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
 nonhlos_globs=("adsp*" "cdsp*" "ipa_fws*")
+vpu_vendor=vpu33_4v.mbn
+vpu_dts=vpu33_p4.mbn
+bt_files=(hmtbtfw20.tlv hmtnv20_Kirby_row.bin)
 
 die() { echo "$me: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
-image="" channel="" vendor="" nonhlos="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
+image="" channel="" vendor="" nonhlos="" btfm="" wifi="" wlanbd="" keys="" work="" out="" key=$repo/system_files/usr/share/microos/keys/microos.pub
 panel=boe size=$((16 * 1024 * 1024 * 1024)) bootimg=1 inner=0 owner=""
 specs=("")
 while (( $# )); do
@@ -27,6 +30,9 @@ while (( $# )); do
     --channel) channel=${2:?$usage}; shift 2 ;;
     --vendor-fw) vendor=${2:?$usage}; shift 2 ;;
     --non-hlos) nonhlos=${2:?$usage}; shift 2 ;;
+    --btfm) btfm=${2:?$usage}; shift 2 ;;
+    --wifi) wifi=${2:?$usage}; shift 2 ;;
+    --wlan-board) wlanbd=${2:?$usage}; shift 2 ;;
     --authorized-keys) keys=${2:?$usage}; shift 2 ;;
     --work) work=${2:?$usage}; shift 2 ;;
     --out) out=${2:?$usage}; shift 2 ;;
@@ -41,12 +47,13 @@ while (( $# )); do
     *) die "$usage" ;;
   esac
 done
-[[ -n $image && -n $channel && -n $vendor && -n $nonhlos && -n $keys && -n $work && -n $out ]] || die "$usage"
+[[ -n $image && -n $channel && -n $vendor && -n $nonhlos && -n $btfm && -n $keys && -n $work && -n $out ]] || die "$usage"
 [[ $image =~ ^([a-z0-9][a-z0-9./_-]*)@(sha256:[0-9a-f]{64})$ ]] || die "--image must be <repo>@sha256:<digest>, got $image"
 imgrepo=${BASH_REMATCH[1]}
 [[ $channel =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || die "bad --channel $channel"
 [[ $panel == boe || $panel == csot ]] || die "--panel is boe or csot"
 [[ $size =~ ^[0-9]+$ ]] || die "--size is a byte count"
+[[ -z $wlanbd || $wlanbd =~ ^bdwlan\.e[0-9a-f]{2}$ ]] || die "--wlan-board is bdwlan.e<two hex digits>"
 
 spec_name() {
   local x name=boot
@@ -69,10 +76,17 @@ for s in "${specs[@]}"; do
 done
 
 if (( ! inner )); then
-  for f in "$vendor" "$nonhlos" "$keys" "$key"; do
+  for f in "$vendor" "$nonhlos" "$btfm" "$keys" "$key" ${wifi:+"$wifi"}; do
     [[ -f $f && -r $f ]] || die "cannot read $f"
   done
-  vendor=$(realpath "$vendor") nonhlos=$(realpath "$nonhlos") keys=$(realpath "$keys")
+  vendor=$(realpath "$vendor") nonhlos=$(realpath "$nonhlos") btfm=$(realpath "$btfm") keys=$(realpath "$keys")
+  wifimount=()
+  if [[ -n $wifi ]]; then
+    wifi=$(realpath "$wifi")
+    [[ ${wifi##*/} =~ ^[A-Za-z0-9._-]+\.nmconnection$ ]] || die "--wifi must be a <name>.nmconnection file"
+    [[ $(stat -c %a "$wifi") == 600 ]] || die "$wifi is not mode 600"
+    wifimount=(-v "$wifi:/in/wifi/${wifi##*/}:ro")
+  fi
   sums=$(dirname "$vendor")/SHA256SUMS
   [[ -r $sums ]] || die "no SHA256SUMS beside $vendor"
   want=$(awk -v f="${vendor##*/}" '$2 == f || $2 == "*" f { print $1 }' "$sums")
@@ -91,15 +105,17 @@ if (( ! inner )); then
   cosign verify --key "$key" "$image" > /dev/null
   sudo -n podman build -q --memory=14g -t "$helper" -f "$here/install.Containerfile" "$here" > /dev/null
   args=(--inner --owner "$(id -u):$(id -g)" --image "$image" --channel "$channel" --vendor-fw /in/vendor-firmware.tar
-    --non-hlos /in/NON-HLOS.bin --authorized-keys /in/authorized_keys --work /work --out /out --panel "$panel"
-    --size "$size")
+    --non-hlos /in/NON-HLOS.bin --btfm /in/BTFM.bin --authorized-keys /in/authorized_keys --work /work --out /out
+    --panel "$panel" --size "$size")
   (( bootimg )) || args+=(--no-bootimg)
+  [[ -z $wifi ]] || args+=(--wifi "/in/wifi/${wifi##*/}")
+  [[ -z $wlanbd ]] || args+=(--wlan-board "$wlanbd")
   for s in "${specs[@]:1}"; do
     args+=(--bootimg "$s")
   done
   exec sudo -n podman run --rm --privileged --memory=14g --cpus=6 -v /dev:/dev \
     -v "$repo:/repo:ro" -v "$work:/work" -v "$out:/out" -v "$vendor:/in/vendor-firmware.tar:ro" \
-    -v "$nonhlos:/in/NON-HLOS.bin:ro" -v "$keys:/in/authorized_keys:ro" \
+    -v "$nonhlos:/in/NON-HLOS.bin:ro" -v "$btfm:/in/BTFM.bin:ro" -v "$keys:/in/authorized_keys:ro" "${wifimount[@]}" \
     "$helper" /repo/build/y700-install-images.sh "${args[@]}"
 fi
 
@@ -121,7 +137,7 @@ cleanup() {
 trap cleanup EXIT
 top=$w/mnt/top
 T=$w/mnt/root
-mkdir -p "$top" "$T" "$w/fw/nh"
+mkdir -p "$top" "$T" "$w/fw/nh" "$w/fw/bt"
 
 log "root.img ($size bytes, btrfs)"
 truncate -s "$size" "$w/root.img"
@@ -196,7 +212,8 @@ install -d -m 0755 "$T/boot/efi"
 log "firmware"
 fw=$var/lib/microos/fw
 dev=$fw/qcom/sm8650/lenovo/tb321fu
-tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}"
+tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" "firmware/$vpu_vendor"
+install -D -m 0644 "$w/fw/firmware/$vpu_vendor" "$dev/$vpu_dts"
 for f in "${vendor_files[@]}"; do
   install -D -m 0644 "$w/fw/firmware/$f" "$dev/$f"
 done
@@ -207,6 +224,14 @@ mcopy -n -i "$nonhlos" "${nonhlos_globs[@]/#/::/image/}" "$w/fw/nh/"
 for f in "$w"/fw/nh/*; do
   install -m 0644 "$f" "$dev/${f##*/}"
 done
+mcopy -n -i "$btfm" "${bt_files[@]/#/::/image/}" "$w/fw/bt/"
+for f in "${bt_files[@]}"; do
+  install -D -m 0644 "$w/fw/bt/$f" "$fw/qca/$f"
+done
+if [[ -n $wlanbd ]]; then
+  mcopy -n -i "$nonhlos" "::/image/kiwi/$wlanbd" "$w/fw/$wlanbd"
+  install -D -m 0644 "$w/fw/$wlanbd" "$fw/ath12k/WCN7850/hw2.0/board.bin"
+fi
 [[ -z $(find "$fw" -name wlan_mac.bin) ]] || die "wlan_mac.bin in $fw"
 (cd "$fw" && find . -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$w/fw.sums"
 install -m 0644 "$w/fw.sums" "$fw/SHA256SUMS"
@@ -313,6 +338,7 @@ mmd -i "$efi" ::/microos ::/logs
 mcopy -i "$efi" "$keys" ::/microos/authorized_keys
 : > "$w/boot-attempts"
 mcopy -i "$efi" "$w/boot-attempts" ::/microos/boot-attempts
+[[ -z $wifi ]] || mcopy -i "$efi" "$wifi" "::/microos/${wifi##*/}"
 if (( bootimg )); then
   mcopy -i "$efi" "$out/boot.img" ::/boot.img
   printf '%s\n' "${ids[0]#* }" > "$w/id"
@@ -323,8 +349,8 @@ img2simg "$efi" "$out/efi.simg"
 chmod 0600 "$out/efi.simg"
 
 cp "$w/fw.sums" "$out/fw.SHA256SUMS"
-printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nOPTIONS=%q\n' \
-  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "$options" > "$out/build.env"
+printf 'IMAGE=%q\nCHANNEL=%q\nCOMMIT=%q\nDEPLOYMENT=%q\nPANEL=%q\nBOOTIMG=%q\nWIFI=%q\nWLAN_BOARD=%q\nOPTIONS=%q\n' \
+  "$image" "$channel" "$commit" "${dep##*/}" "$panel" "$bootimg" "${wifi##*/}" "$wlanbd" "$options" > "$out/build.env"
 (cd "$out" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum) > "$w/sums"
 mv "$w/sums" "$out/SHA256SUMS"
 cat "$out/SHA256SUMS" >&2

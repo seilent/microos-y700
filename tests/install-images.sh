@@ -4,18 +4,19 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 helper=localhost/microos-y700-install
-usage="usage: install-images.sh --image <repo@sha256:digest> --channel <tag> --vendor-fw <tar> --non-hlos <NON-HLOS.bin> --work <dir> --out <dir> [--authorized-keys <file>] [--dtbo <dtbo_b readback>] [--no-build] [build args...]"
+usage="usage: install-images.sh --image <repo@sha256:digest> --channel <tag> --vendor-fw <tar> --non-hlos <NON-HLOS.bin> --btfm <BTFM.bin> --work <dir> --out <dir> [--authorized-keys <file>] [--wifi <name>.nmconnection] [--dtbo <dtbo_b readback>] [--no-build] [build args...]"
 root_part=726392975360
 efi_part=1073741824
 vendor_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw gen70900_zap.mbn novatek_ts_boe_fw.bin
   novatek_ts_csot_fw.bin)
 gpu_files=(gen70900_sqe.fw gmu_gen70900.bin gen70900_aqe.fw)
+bt_files=(hmtbtfw20.tlv hmtnv20_Kirby_row.bin)
 
 rc=0
 fail() { echo "FAIL: $*" >&2; rc=1; }
 die() { echo "install-images: $*" >&2; exit 1; }
 
-image="" channel="" vendor="" nonhlos="" work="" out="" keys="" dtbo="" inner=0 nobuild=0
+image="" channel="" vendor="" nonhlos="" btfm="" wifi="" work="" out="" keys="" dtbo="" inner=0 nobuild=0
 build=()
 while (( $# )); do
   case $1 in
@@ -23,6 +24,8 @@ while (( $# )); do
     --channel) channel=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
     --vendor-fw) vendor=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
     --non-hlos) nonhlos=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
+    --btfm) btfm=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
+    --wifi) wifi=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
     --work) work=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
     --out) out=${2:?$usage}; build+=("$1" "$2"); shift 2 ;;
     --authorized-keys) keys=${2:?$usage}; shift 2 ;;
@@ -32,7 +35,7 @@ while (( $# )); do
     *) build+=("$1"); shift ;;
   esac
 done
-[[ -n $image && -n $channel && -n $vendor && -n $nonhlos && -n $work && -n $out ]] || die "$usage"
+[[ -n $image && -n $channel && -n $vendor && -n $nonhlos && -n $btfm && -n $work && -n $out ]] || die "$usage"
 
 if (( ! inner )); then
   mkdir -p "$work"
@@ -46,9 +49,13 @@ if (( ! inner )); then
   (( nobuild )) || "$repo/build/y700-install-images.sh" "${build[@]}" --authorized-keys "$keys"
   out=$(realpath "$out") work=$(realpath "$work")
   mounts=(-v "$repo:/repo:ro" -v "$work:/work" -v "$out:/out:ro" -v "$(realpath "$vendor"):/in/vendor-firmware.tar:ro"
-    -v "$(realpath "$nonhlos"):/in/NON-HLOS.bin:ro" -v "$(realpath "$keys"):/in/keys:ro")
+    -v "$(realpath "$nonhlos"):/in/NON-HLOS.bin:ro" -v "$(realpath "$btfm"):/in/BTFM.bin:ro" -v "$(realpath "$keys"):/in/keys:ro")
   args=(--inner --image "$image" --channel "$channel" --vendor-fw /in/vendor-firmware.tar --non-hlos /in/NON-HLOS.bin
-    --work /work --out /out)
+    --btfm /in/BTFM.bin --work /work --out /out)
+  if [[ -n $wifi ]]; then
+    mounts+=(-v "$(realpath "$wifi"):/in/wifi.nmconnection:ro")
+    args+=(--wifi /in/wifi.nmconnection)
+  fi
   if [[ -n $dtbo ]]; then
     mounts+=(-v "$(realpath "$dtbo"):/in/dtbo.img:ro")
     args+=(--dtbo /in/dtbo.img)
@@ -74,7 +81,7 @@ cleanup() {
 trap cleanup EXIT
 top=$w/mnt/top
 T=$w/mnt/root
-mkdir -p "$top" "$T" "$w/fw/nh"
+mkdir -p "$top" "$T" "$w/fw/nh" "$w/fw/bt"
 imgrepo=${image%@*}
 . "$out/build.env"
 [[ $IMAGE == "$image" ]] || fail "build.env IMAGE $IMAGE, expected $image"
@@ -167,9 +174,20 @@ grep -qxF 'PARTLABEL=microos_efi /boot/efi vfat nofail,x-systemd.device-timeout=
 
 fw=$T/ostree/deploy/default/var/lib/microos/fw
 dev=$fw/qcom/sm8650/lenovo/tb321fu
-tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}"
+tar -x -f "$vendor" -C "$w/fw" "${vendor_files[@]/#/firmware/}" firmware/vpu33_4v.mbn
 mcopy -n -i "$nonhlos" "::/image/adsp*" "::/image/cdsp*" "::/image/ipa_fws*" "$w/fw/nh/"
-expect=()
+mcopy -n -i "$btfm" "${bt_files[@]/#/::/image/}" "$w/fw/bt/"
+expect=(qcom/sm8650/lenovo/tb321fu/vpu33_p4.mbn)
+cmp -s "$w/fw/firmware/vpu33_4v.mbn" "$dev/vpu33_p4.mbn" || fail "$dev/vpu33_p4.mbn differs from the vendor vpu33_4v.mbn"
+for f in "${bt_files[@]}"; do
+  cmp -s "$w/fw/bt/$f" "$fw/qca/$f" || fail "$fw/qca/$f differs from BTFM.bin"
+  expect+=("qca/$f")
+done
+if [[ -n ${WLAN_BOARD:-} ]]; then
+  mcopy -n -i "$nonhlos" "::/image/kiwi/$WLAN_BOARD" "$w/fw/$WLAN_BOARD"
+  cmp -s "$w/fw/$WLAN_BOARD" "$fw/ath12k/WCN7850/hw2.0/board.bin" || fail "ath12k board.bin differs from $WLAN_BOARD"
+  expect+=(ath12k/WCN7850/hw2.0/board.bin)
+fi
 for f in "${vendor_files[@]}"; do
   cmp -s "$w/fw/firmware/$f" "$dev/$f" || fail "$dev/$f differs from the vendor copy"
   expect+=("qcom/sm8650/lenovo/tb321fu/$f")
@@ -212,10 +230,26 @@ fsck.fat -n "$out/efi.img" > /dev/null || fail "fsck.fat efi.img"
 mapfile -t efils < <(mdir -/ -b -i "$out/efi.img" :: | sed 's|^::||' | LC_ALL=C sort)
 efiwant=(/logs/ /microos/ /microos/authorized_keys /microos/boot-attempts)
 (( BOOTIMG )) && efiwant+=(/.microos-bootimg.id /boot.img)
+[[ -z $WIFI ]] || efiwant+=("/microos/$WIFI")
 mapfile -t efiwant < <(printf '%s\n' "${efiwant[@]}" | LC_ALL=C sort)
 [[ ${efils[*]} == "${efiwant[*]}" ]] || fail "efi.img holds ${efils[*]}, expected ${efiwant[*]}"
 mcopy -n -i "$out/efi.img" ::/microos/authorized_keys "$w/keys"
 cmp -s "$w/keys" /in/keys || fail "efi.img authorized_keys differs"
+if [[ -n $WIFI ]]; then
+  [[ -n $wifi ]] || fail "efi.img holds a Wi-Fi keyfile, the test got no --wifi"
+  mcopy -n -i "$out/efi.img" "::/microos/$WIFI" "$w/wifi"
+  [[ -z $wifi ]] || cmp -s "$w/wifi" /in/wifi.nmconnection || fail "efi.img Wi-Fi keyfile differs"
+  rm -f "$w/wifi"
+  sed -n 's/^psk=//p' /in/wifi.nmconnection > "$w/psk"
+  if [[ -s $w/psk ]]; then
+    ! grep -qaF -f "$w/psk" "$out"/*.info "$out"/build.env "$out"/bootimg.ids "$out"/SHA256SUMS "$out"/fw.SHA256SUMS \
+      || fail "the Wi-Fi psk is in an output text file"
+    ! grep -rqaF -f "$w/psk" "$dep/etc" "$T/ostree/deploy/default/var" || fail "the Wi-Fi psk is in the root image"
+  fi
+  rm -f "$w/psk"
+elif [[ -n $wifi ]]; then
+  fail "the test got --wifi, efi.img holds no keyfile"
+fi
 mcopy -n -i "$out/efi.img" ::/microos/boot-attempts "$w/attempts"
 [[ ! -s $w/attempts ]] || fail "boot-attempts is not empty"
 
