@@ -39,7 +39,7 @@ if [[ -n $kround ]]; then
   case $kround in
     p0|p1a) kchecks="udc wlan0" ;;
     p1b) kchecks="udc wlan0 dsi" ;;
-    p1c) kchecks="udc wlan0 dsi touch pen" ;;
+    p1c|p2a) kchecks="udc wlan0 dsi touch pen" ;;
     *) die "not confirmed: kround $kround has no checks" ;;
   esac
   allow=" $MICROOS_BOOT_OK_ALLOW "
