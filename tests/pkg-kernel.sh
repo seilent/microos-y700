@@ -25,7 +25,7 @@ builtin=(
   PINCTRL_SM8650 SM_GCC_8650 SM_TCSRCC_8650 SM_DISPCC_8550 SM_GPUCC_8650 INTERCONNECT_QCOM_SM8650 QCOM_LLCC
   DRM DRM_KMS_HELPER DRM_DISPLAY_HELPER DRM_SCHED DRM_GPUVM DRM_EXEC DRM_MIPI_DSI
   DRM_MSM DRM_MSM_MDSS DRM_MSM_DPU DRM_MSM_DSI DRM_MSM_DSI_7NM_PHY DRM_MSM_DP DRM_DISPLAY_DSC_HELPER
-  DRM_PANEL_NOVATEK_NT36523 BACKLIGHT_CLASS_DEVICE BACKLIGHT_KTZ8866 FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
+  DRM_PANEL_NOVATEK_NT36523 BACKLIGHT_CLASS_DEVICE BACKLIGHT_KTZ8866 REGULATOR_AW37503 FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
   I2C_QCOM_GENI QCOM_GPI_DMA SCSI_UFS_QCOM PHY_QCOM_QMP_UFS QCOM_PMIC_GLINK UCSI_PMIC_GLINK
   PHY_QCOM_QMP_COMBO DRM_AUX_BRIDGE DRM_AUX_HPD_BRIDGE TYPEC
   FTRACE TRACING EVENT_TRACING TRACEPOINTS PM_DEBUG PM_SLEEP_DEBUG HIDRAW NTSYNC LRU_GEN_ENABLED
@@ -63,6 +63,43 @@ mdss=$(fdtget -t x "$abl" /soc@0/display-subsystem@ae00000 phandle)
 splash=$(fdtget -t x "$abl" /reserved-memory/splash_region phandle)
 [[ $(fdtget -t x "$abl" /reserved-memory/splash_region iommu-addresses) == "$mdss 0 d5100000 0 2b00000" ]] || { echo "pkg-kernel: abl dtb splash iommu-addresses" >&2; exit 1; }
 [[ $(fdtget -t x "$abl" /soc@0/display-subsystem@ae00000 memory-region) == "$splash" ]] || { echo "pkg-kernel: abl dtb mdss memory-region" >&2; exit 1; }
+
+for s in lenovo,tb321fu-boe-nt36523 lenovo,tb321fu-csot-nt36523 kinetic,ovp-microvolt kinetic,inductor-nanohenry; do
+  grep -qaF "$s" "$kdir/vmlinuz" || { echo "pkg-kernel: vmlinuz lacks $s" >&2; exit 1; }
+done
+
+main=$kdir/dtb/qcom/sm8650-lenovo-tb321fu.dtb
+csot=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-csot.dtb
+bl=/soc@0/geniqup@8c0000/i2c@888000/backlight@11
+disp=/soc@0/display-subsystem@ae00000
+panel=$disp/dsi@ae94000/panel@0
+for d in "$main" "$csot" "$abl"; do
+  n=$(basename "$d")
+  for dsi in dsi@ae94000 dsi@ae96000; do
+    fdtget "$d" "$disp/$dsi" qcom,dual-dsi-mode > /dev/null && fdtget "$d" "$disp/$dsi" qcom,sync-dual-dsi > /dev/null ||
+      { echo "pkg-kernel: $n $dsi is not dual sync DSI" >&2; exit 1; }
+    [[ $(fdtget "$d" "$disp/$dsi/ports/port@1/endpoint" data-lanes) == "0 1 2" ]] || { echo "pkg-kernel: $n $dsi data-lanes" >&2; exit 1; }
+  done
+  fdtget "$d" "$disp/dsi@ae94000" qcom,master-dsi > /dev/null || { echo "pkg-kernel: $n dsi0 is not the master" >&2; exit 1; }
+  ! fdtget "$d" "$disp/dsi@ae96000" qcom,master-dsi > /dev/null 2>&1 || { echo "pkg-kernel: $n dsi1 is a master" >&2; exit 1; }
+  for phy in phy@ae95000 phy@ae97000; do
+    [[ $(fdtget "$d" "$disp/$phy" phy-type) == 11 ]] || { echo "pkg-kernel: $n $phy is not C-PHY" >&2; exit 1; }
+  done
+  for sup in vddio-supply vci-supply vdd-supply; do
+    fdtget "$d" "$panel" "$sup" > /dev/null || { echo "pkg-kernel: $n panel has no $sup" >&2; exit 1; }
+  done
+  [[ $(fdtget -t x "$d" "$panel" vddio-supply) == "$(fdtget -t x "$d" /regulator-panel-iovdd phandle)" ]] ||
+    { echo "pkg-kernel: $n panel vddio is not the IOVDD switch" >&2; exit 1; }
+  for node in /soc@0/clock-controller@af00000 /soc@0/display-subsystem@ae00000 "$bl" /soc@0/geniqup@8c0000/i2c@888000/regulator@3e; do
+    [[ $(fdtget -d okay "$d" "$node" status) == okay ]] || { echo "pkg-kernel: $n $node is off" >&2; exit 1; }
+  done
+  v="$(fdtget "$d" "$bl" kinetic,ovp-microvolt) $(fdtget "$d" "$bl" kinetic,inductor-nanohenry)"
+  v+=" $(fdtget "$d" "$bl" led-max-microamp) $(fdtget "$d" "$bl" current-num-sinks)"
+  [[ $v == "34000000 4700 15600 4" ]] || { echo "pkg-kernel: $n ktz8866 settings $v" >&2; exit 1; }
+done
+[[ $(fdtget "$main" "$panel" compatible) == "lenovo,tb321fu-boe-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: main dtb panel" >&2; exit 1; }
+[[ $(fdtget "$abl" "$panel" compatible) == "lenovo,tb321fu-boe-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: abl dtb panel" >&2; exit 1; }
+[[ $(fdtget "$csot" "$panel" compatible) == "lenovo,tb321fu-csot-nt36523 novatek,nt36523" ]] || { echo "pkg-kernel: csot dtb panel" >&2; exit 1; }
 
 dtbo=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-dtbo.img
 [[ -f $dtbo ]] || { echo "pkg-kernel: dtbo image missing" >&2; exit 1; }
