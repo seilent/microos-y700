@@ -22,14 +22,14 @@ grep -qx "$(cat /usr/lib/microos/version)" /usr/lib/os-release || fail "version 
 [[ $(readlink /etc/os-release) == ../usr/lib/os-release ]] || fail "/etc/os-release is not the relative symlink"
 
 rpm -q android-tools btrfs-progs dosfstools jq util-linux rsync dnsmasq python3 >/dev/null || fail "base rpms missing"
-for c in mkbootimg skopeo jq flock python3 btrfs mkfs.vfat rsync dnsmasq sshd NetworkManager sudo; do
+for c in mkbootimg unpack_bootimg avbtool skopeo jq flock python3 btrfs mkfs.vfat rsync dnsmasq sshd NetworkManager sudo; do
   command -v "$c" >/dev/null || fail "$c missing"
 done
 grep -qx 'install_weak_deps=False' /etc/dnf/libdnf5.conf.d/10-microos.conf || fail "10-microos.conf does not turn off weak deps"
 [[ -z $(rpm -qa '*-debuginfo' '*-debugsource') ]] || fail "debug rpms installed: $(rpm -qa '*-debuginfo' '*-debugsource' | tr '\n' ' ')"
 own=$(rpm -qa --qf '%{NAME}\t%{VENDOR}\n' | awk -F'\t' '$2 == "MicroOS" && $1 != "microos-kernel" { print $1 }')
 [[ -z $own ]] || fail "MicroOS rpms other than microos-kernel: $(tr '\n' ' ' <<< "$own")"
-for p in gamescope gamescope-session inputplumber steamos-manager microset mangohud lsfg-vk hexagonrpc microos-eq \
+for p in qbootctl gamescope gamescope-session inputplumber steamos-manager microset mangohud lsfg-vk hexagonrpc microos-eq \
   libfreeaptx pipewire-codec-aptx sddm microos-android-guestos microos-steam-seed; do
   ! rpm -q "$p" >/dev/null 2>&1 || fail "$p is installed"
 done
@@ -41,16 +41,25 @@ for u in bootloader-update.service systemd-backlight@.service systemd-hibernate.
 done
 [[ $(readlink /etc/systemd/user/mpris-proxy.service) == /dev/null ]] || fail "user mpris-proxy.service is not masked"
 
+tests=(microos-test-bootloader.service microos-test-emergency.service microos-test-gptdump.service microos-test-panic.service
+  microos-test-wdhang.service)
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
-  microos-update-check.service microos-update-check.timer)
+  microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
+  microos-bootlog-efi.service microos-grow-root.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
 done
 got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
-for u in microos-boot-ok.service microos-provision.service microos-update-applied.service; do
+for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
+  microos-bootlog-efi.service microos-grow-root.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
+done
+[[ -L /etc/systemd/system/microos-boot-ok.service.wants/microos-bootlog-efi.service ]] || fail "microos-bootlog-efi.service is not wanted by boot ok"
+for u in "${tests[@]}"; do
+  w=${u#microos-test-}
+  systemctl cat "$u" | grep -qx "ConditionKernelCommandLine=microos.test=${w%.service}" || fail "$u has no microos.test condition"
 done
 [[ $(systemctl is-enabled microos-update-check.timer) == masked ]] || fail "microos-update-check.timer is not masked"
 [[ ! -e /usr/lib/systemd/user-preset/50-microos.preset && -z $(compgen -G '/usr/lib/systemd/user/microos-*') ]] \
@@ -67,16 +76,36 @@ kept=(
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf
+  /usr/lib/dracut/modules.d/92microos-y700-guard/cmdline.conf
+  /usr/lib/dracut/modules.d/92microos-y700-guard/efi-device.conf
+  /usr/lib/dracut/modules.d/92microos-y700-guard/emergency.conf
+  /usr/lib/dracut/modules.d/92microos-y700-guard/microos-guard
+  /usr/lib/dracut/modules.d/92microos-y700-guard/microos-guard.service
+  /usr/lib/dracut/modules.d/92microos-y700-guard/microos-initrd-log
+  /usr/lib/dracut/modules.d/92microos-y700-guard/module-setup.sh
+  /usr/lib/dracut/modules.d/92microos-y700-guard/switch-root.conf
   /usr/lib/microos/boot-ok.conf
   /usr/lib/microos/bootimg.conf
+  /usr/lib/microos/slot.conf
   /usr/lib/microos/version
   /usr/lib/sysctl.d/60-microos-yama.conf
+  /usr/lib/systemd/journald.conf.d/10-microos.conf
   /usr/lib/systemd/system-preset/50-microos.preset
+  /usr/lib/systemd/system/emergency.service.d/10-microos.conf
+  /usr/lib/systemd/system/microos-boot-deadline.service
+  /usr/lib/systemd/system/microos-boot-deadline.timer
   /usr/lib/systemd/system/microos-boot-ok.service
+  /usr/lib/systemd/system/microos-bootlog-efi.service
+  /usr/lib/systemd/system/microos-grow-root.service
   /usr/lib/systemd/system/microos-provision.service
   /usr/lib/systemd/system/microos-update-applied.service
   /usr/lib/systemd/system/microos-update-check.service
   /usr/lib/systemd/system/microos-update-check.timer
+  /usr/lib/systemd/system/microos-test-bootloader.service
+  /usr/lib/systemd/system/microos-test-emergency.service
+  /usr/lib/systemd/system/microos-test-gptdump.service
+  /usr/lib/systemd/system/microos-test-panic.service
+  /usr/lib/systemd/system/microos-test-wdhang.service
   /usr/lib/systemd/system/microos-update.service
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/sysusers.d/microos.conf
@@ -84,9 +113,14 @@ kept=(
   /usr/libexec/microos/microos-boot-ok
   /usr/libexec/microos/microos-bootimg-build
   /usr/libexec/microos/microos-bootlog
+  /usr/libexec/microos/microos-efi-log
+  /usr/libexec/microos/microos-fail
+  /usr/libexec/microos/microos-grow-root
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-update-applied
+  /usr/libexec/microos/microos-test
   /usr/libexec/microos/prepare-root
+  /usr/share/microos/avb/testkey_rsa4096.pem
   /usr/share/microos/keys/microos-backup.pub
   /usr/share/microos/keys/microos-next.pub
   /usr/share/microos/keys/microos.pub
@@ -118,7 +152,20 @@ grep -qx 'kernel.yama.ptrace_scope = 1' "$yama" || fail "$yama does not set ptra
 last=$(/usr/lib/systemd/systemd-sysctl --cat-config | awk '/^# \/[^ ]*\.conf( -> |$)/ { f = $2 } /^-?kernel[.\/]yama[.\/]ptrace_scope[[:space:]]*=/ { l = f " " $0 } END { print l }')
 [[ $last == "$yama kernel.yama.ptrace_scope = 1" ]] || fail "the last ptrace_scope setting is not $yama: $last"
 
-grep -qx 'match-architectures = \["aarch64"\]' /usr/lib/bootc/kargs.d/10-microos.toml || fail "10-microos.toml is not aarch64 only"
+[[ $(< /usr/lib/bootc/kargs.d/10-microos.toml) == 'match-architectures = ["aarch64"]
+kargs = [
+  "firmware_class.path=/var/lib/microos/fw",
+  "loglevel=4",
+  "regulator_ignore_unused",
+  "clk_ignore_unused",
+  "pd_ignore_unused",
+  "reboot=cold",
+  "cpuidle.off=1",
+]' ]] || fail "10-microos.toml kargs"
+[[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=0\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not keep slot writes off"
+[[ $(sha256sum < /usr/share/microos/avb/testkey_rsa4096.pem) == "6a224754880a57ab9cbd308267cd157d94cf05a1c8cb851aec4090e045d24121  -" ]] \
+  || fail "AVB test key sha256"
+[[ $(< /usr/lib/systemd/journald.conf.d/10-microos.conf) == $'[Journal]\nStorage=persistent' ]] || fail "journald 10-microos.conf"
 [[ $(< /usr/lib/bootc/install/00-microos.toml) == $'[install.filesystem.root]\ntype = "btrfs"' ]] || fail "00-microos.toml"
 [[ $(< /usr/lib/NetworkManager/conf.d/10-microos.conf) == $'[keyfile]\npath=/var/lib/NetworkManager/system-connections' ]] \
   || fail "NetworkManager 10-microos.conf"
@@ -136,6 +183,9 @@ execs() {
 [[ -z $(execs ostree-finalize-staged.service ExecStartPre) ]] || fail "ostree-finalize-staged.service has an ExecStartPre"
 [[ $(execs microos-boot-ok.service After) == 'multi-user.target ostree-finalize-staged.service' ]] \
   || fail "microos-boot-ok.service After: $(execs microos-boot-ok.service After)"
+[[ $(execs emergency.service ExecStart) == '-/usr/libexec/microos/microos-fail emergency' ]] \
+  || fail "effective emergency.service ExecStart: $(execs emergency.service ExecStart)"
+systemctl cat microos-boot-deadline.timer | grep -qx 'OnBootSec=900' || fail "microos-boot-deadline.timer is not 900 s"
 systemctl cat sshd.service | grep -qx 'ConditionPathExists=/var/home/micro/.ssh/authorized_keys' \
   || fail "sshd.service has no ConditionPathExists on micro's authorized_keys"
 while read -r u p; do
@@ -194,6 +244,19 @@ for f in usr/lib/ostree/ostree-prepare-root usr/libexec/microos/prepare-root usr
 done
 ! grep -qE "/kernel/drivers/(gpu|pwm|video/backlight)/.*\.ko" <<< "$list" || fail "initramfs has a GPU, PWM or backlight module"
 [[ $(lsinitrd -f "$dropin" "$img") == $'[Service]\nExecStart=\nExecStart=/usr/libexec/microos/prepare-root' ]] || fail "remap drop-in content"
+for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-log usr/lib/systemd/system/microos-guard.service \
+  etc/microos-initrd-id usr/lib/systemd/system/emergency.service.d/10-microos.conf \
+  usr/lib/systemd/system/dracut-emergency.service.d/10-microos.conf; do
+  grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
+done
+grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || fail "initramfs does not enable microos-guard.service"
+grep -qE "/nvmem_qcom-spmi-sdam\.ko" <<< "$list" || fail "initramfs lacks nvmem_qcom-spmi-sdam"
+[[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] || fail "initramfs cmdline.d/90-microos.conf"
+[[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
+  $'[Service]\nExecStart=\nExecStart=systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd' ]] || fail "initramfs switch-root drop-in"
+[[ $(lsinitrd -f 'usr/lib/systemd/system/dev-disk-by?x2dpartlabel-microos_efi.device.d/10-microos.conf' "$img") == \
+  $'[Unit]\nJobRunningTimeoutSec=45' ]] || fail "initramfs microos_efi device timeout"
+[[ $(lsinitrd -f etc/microos-initrd-id "$img") =~ ^$kver\ [0-9]{8}T[0-9]{6}Z$ ]] || fail "initramfs microos-initrd-id"
 lsinitrd -f usr/lib/systemd/system/ostree-prepare-root.service "$img" | grep -qx 'ExecStart=/usr/lib/ostree/ostree-prepare-root /sysroot' \
   || fail "ostree-prepare-root.service ExecStart changed"
 

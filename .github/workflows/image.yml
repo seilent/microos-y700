@@ -161,6 +161,7 @@ jobs:
           podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/image.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootimg.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/bootok.sh
+          podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/guard.sh
           podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/update.sh
 
       - name: Source RPMs

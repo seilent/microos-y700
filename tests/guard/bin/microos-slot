@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "microos-slot $*" >> "$FAKE_STATE/slot.log"
+exit "${FAKE_SLOT_RC:-0}"
