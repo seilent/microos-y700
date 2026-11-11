@@ -156,7 +156,7 @@ done
 slotconf=$tmp/slot.conf
 run_fail() {
   env MICROOS_EFI="$efi" MICROOS_RUNDIR="$tmp/run" MICROOS_CMDLINE="$tmp/cmdline" MICROOS_SLOT_CONF="$slotconf" \
-    MICROOS_SLOT="${SLOT:-$here/guard/bin/microos-slot}" MICROOS_EFI_LOG="$efilog" MICROOS_NVMEM_ROOT="$nv" "$mfail" "$@" > /dev/null 2> "$tmp/fail.err"
+    MICROOS_EFI_LOG="$efilog" MICROOS_NVMEM_ROOT="$nv" "$mfail" "$@" > /dev/null 2> "$tmp/fail.err"
 }
 reboots() { cat "$FAKE_STATE/systemctl.log" 2> /dev/null | grep -c '^systemctl reboot$' || true; }
 bootloader_reboots() { cat "$FAKE_STATE/systemctl.log" 2> /dev/null | grep -c '^systemctl reboot --reboot-argument=bootloader$' || true; }
@@ -168,39 +168,38 @@ echo "$id 3" > "$efi/microos/boot-attempts"
 mkdir -p "$tmp/run"
 echo "$id" > "$tmp/run/boot-confirmed"
 run_fail deadline || fail "deadline after boot ok failed"
-[[ $(reboots) == 0 && ! -e $FAKE_STATE/slot.log ]] || fail "deadline acted on a confirmed boot"
+[[ $(reboots) == 0 ]] || fail "deadline acted on a confirmed boot"
 rm "$tmp/run/boot-confirmed"
 run_fail deadline
 [[ $(cat "$tmp/fail.err") == *"no $tmp/run/boot-confirmed"* ]] || fail "deadline reason: $(cat "$tmp/fail.err")"
-[[ $(reboots) == 1 && $(cat "$FAKE_STATE/slot.log") == "microos-slot set a" && $(attempts) == "$id 0" ]] \
-  || fail "deadline at 3 tries: reboots $(reboots), slot $(cat "$FAKE_STATE/slot.log" 2> /dev/null), $(attempts)"
+[[ $(reboots) == 1 && $(attempts) == "$id 3" ]] || fail "deadline at 3 tries: reboots $(reboots), $(attempts)"
+[[ $(cat "$tmp/fail.err") == *"plain reboot, the ABL retry budget decides"* ]] || fail "deadline at 3 tries: $(cat "$tmp/fail.err")"
 [[ $(cat "$efi/logs/deadline-1.txt") == "journal of this boot" ]] || fail "deadline log"
 reset
 cmdline
 mkdir -p "$efi/microos"
 echo "$id 2" > "$efi/microos/boot-attempts"
 run_fail deadline
-[[ $(reboots) == 1 && ! -e $FAKE_STATE/slot.log && $(attempts) == "$id 2" ]] || fail "deadline at 2 tries"
+[[ $(reboots) == 1 && $(attempts) == "$id 2" ]] || fail "deadline at 2 tries"
 echo "$id 3" > "$efi/microos/boot-attempts"
 printf 'MICROOS_SLOT_WRITE=0\nMICROOS_BOOT_TRIES=3\n' > "$slotconf"
 run_fail emergency
-[[ $(reboots) == 1 && $(bootloader_reboots) == 1 && ! -e $FAKE_STATE/slot.log && $(attempts) == "$id 3" && $(preset_of spmi_sdam1) == 04 ]] \
-  || fail "emergency with slot writes off: reboots $(reboots), bootloader $(bootloader_reboots), preset $(preset_of spmi_sdam1)"
+[[ $(reboots) == 2 && $(bootloader_reboots) == 0 && $(attempts) == "$id 3" && $(nonzero spmi_sdam1) == 0 ]] \
+  || fail "production image at 3 tries: reboots $(reboots), bootloader $(bootloader_reboots), preset $(preset_of spmi_sdam1)"
 [[ -s $efi/logs/emergency-1.txt ]] || fail "emergency log"
-printf 'MICROOS_SLOT_WRITE=1\nMICROOS_BOOT_TRIES=3\n' > "$slotconf"
-FAKE_SLOT_RC=1 run_fail emergency
-[[ $(attempts) == "$id 3" && $(bootloader_reboots) == 2 ]] || fail "failed microos-slot: $(attempts), bootloader $(bootloader_reboots)"
-SLOT=$tmp/missing run_fail emergency
-[[ $(attempts) == "$id 3" && $(bootloader_reboots) == 3 && $(cat "$tmp/fail.err") == *"missing, slot a not selected"* ]] || fail "missing microos-slot"
+rm -f "$FAKE_STATE/systemctl.log"
+cmdline microos.test=1
+run_fail emergency
+[[ $(reboots) == 0 && $(bootloader_reboots) == 1 && $(attempts) == "$id 3" && $(preset_of spmi_sdam1) == 04 ]] \
+  || fail "test image at 3 tries: reboots $(reboots), bootloader $(bootloader_reboots), preset $(preset_of spmi_sdam1)"
 rm "$nv/spmi_sdam1/of_node"
 printf '\000' | dd of="$nv/spmi_sdam1/nvmem" bs=1 seek=72 conv=notrunc status=none
-SLOT=$tmp/missing run_fail emergency
-[[ $(bootloader_reboots) == 3 && $(reboots) == 2 && $(cat "$tmp/fail.err") == *"no fastboot preset"* ]] || fail "no SDAM: bootloader $(bootloader_reboots), plain $(reboots): $(cat "$tmp/fail.err")"
+run_fail emergency
+[[ $(bootloader_reboots) == 1 && $(reboots) == 1 && $(cat "$tmp/fail.err") == *"no fastboot preset"* ]] || fail "no SDAM: bootloader $(bootloader_reboots), plain $(reboots): $(cat "$tmp/fail.err")"
 ln -s "$tmp/dt/pmic@0/nvram@7100" "$nv/spmi_sdam1/of_node"
 echo "bbbbbbbbbbbb 5" > "$efi/microos/boot-attempts"
-rm -f "$FAKE_STATE/slot.log"
 run_fail emergency
-[[ ! -e $FAKE_STATE/slot.log ]] || fail "another id's count selected slot a"
+[[ $(bootloader_reboots) == 1 && $(reboots) == 2 ]] || fail "another id's count acted: bootloader $(bootloader_reboots)"
 
 reset
 mkdir -p "$efi/logs"

@@ -5,7 +5,6 @@ me=microos-fail
 conf=${MICROOS_SLOT_CONF:-/usr/lib/microos/slot.conf}
 cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 rundir=${MICROOS_RUNDIR:-/run/microos}
-slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
 efilog=${MICROOS_EFI_LOG:-/usr/libexec/microos/microos-efi-log}
 sdamlib=${MICROOS_SDAM_LIB:-/usr/libexec/microos/microos-sdam}
 say() { echo "$me: $*" >&2; }
@@ -21,7 +20,6 @@ if [[ $why == deadline ]]; then
   say "boot not confirmed: no $rundir/boot-confirmed"
 fi
 
-MICROOS_SLOT_WRITE=0
 MICROOS_BOOT_TRIES=3
 [[ -r $conf ]] && . "$conf"
 
@@ -31,13 +29,15 @@ if [[ -z ${MICROOS_EFI:-} ]] && ! mountpoint -q "$efi" && ! timeout 30 mount "$e
   efi=""
 fi
 
-switched=0
 if [[ -n $efi ]]; then
   MICROOS_EFI=$efi "$efilog" "$why" || say "no $why log on $efi"
-  id=""
+  id="" test=""
   read -ra words < "$cmdline" || true
   for w in "${words[@]}"; do
-    [[ $w != microos.id=* ]] || id=${w#microos.id=}
+    case $w in
+      microos.id=*) id=${w#microos.id=} ;;
+      microos.test=*) test=${w#microos.test=} ;;
+    esac
   done
   f=$efi/microos/boot-attempts
   fid="" count=0
@@ -46,18 +46,7 @@ if [[ -n $efi ]]; then
   [[ -n $id && $fid == "$id" ]] || count=0
   say "${id:-no microos.id}, attempt $count of $MICROOS_BOOT_TRIES"
   if (( count >= MICROOS_BOOT_TRIES )); then
-    if [[ $MICROOS_SLOT_WRITE != 1 ]]; then
-      say "slot writes are off, slot a not selected"
-    elif [[ ! -x $slot ]]; then
-      say "$slot is missing, slot a not selected"
-    elif "$slot" set a; then
-      { echo "$id 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; } || say "cannot reset $f"
-      say "slot a selected, counter reset"
-      switched=1
-    else
-      say "microos-slot set a failed"
-    fi
-    if (( ! switched )); then
+    if [[ -n $test ]]; then
       if [[ -r $sdamlib ]] && . "$sdamlib" && sdam_find && sdam_put preset; then
         say "fastboot preset written in ${sdam##*/}, rebooting into the bootloader"
         sync
@@ -65,6 +54,8 @@ if [[ -n $efi ]]; then
         exit 0
       fi
       say "no fastboot preset, plain reboot"
+    else
+      say "plain reboot, the ABL retry budget decides"
     fi
   fi
 fi

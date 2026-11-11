@@ -406,14 +406,23 @@ if [[ -r $slotconf ]]; then
   . "$slotconf"
 fi
 if (( flash )); then
+  if [[ -x $slot ]]; then
+    if st=$("$slot" status 2>&1); then
+      while IFS= read -r l; do
+        say "slot status: $l"
+      done <<< "$st"
+    else
+      say "microos-slot status failed: ${st##*$'\n'}"
+    fi
+  fi
   if [[ $MICROOS_SLOT_WRITE != 1 ]]; then
-    say "slot writes are off, boot_b not marked good"
+    say "slot writes are off, slot b not armed"
   elif [[ ! -x $slot ]]; then
-    say "$slot is missing, boot_b not marked good"
-  elif "$slot" mark-good; then
-    say "boot_b marked good"
+    say "$slot is missing, slot b not armed"
+  elif "$slot" arm; then
+    say "slot b armed, retry 7"
   else
-    say "microos-slot mark-good failed"
+    say "microos-slot arm failed"
   fi
 fi
 

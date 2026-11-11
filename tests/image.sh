@@ -215,7 +215,7 @@ kargs = [
   "reboot=cold",
   "cpuidle.off=1",
 ]' ]] || fail "10-microos.toml kargs"
-[[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=0\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not keep slot writes off"
+[[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=1\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not turn slot writes on"
 [[ $(sha256sum < /usr/share/microos/avb/testkey_rsa4096.pem) == "6a224754880a57ab9cbd308267cd157d94cf05a1c8cb851aec4090e045d24121  -" ]] \
   || fail "AVB test key sha256"
 [[ $(< /usr/lib/systemd/journald.conf.d/10-microos.conf) == $'[Journal]\nStorage=persistent' ]] || fail "journald 10-microos.conf"

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import fcntl
+import mmap
 import os
+import shutil
 import struct
 import sys
 import zlib
@@ -11,16 +13,17 @@ LAYOUT = {
     "root_label": "microos",
     "byte": 54,
     "fields": {"priority": (0, 2), "active": (2, 1), "retry": (3, 3), "successful": (6, 1), "unbootable": (7, 1)},
-    "set_target": {"priority": 3, "active": 1, "retry": 1, "successful": 0, "unbootable": 0},
-    "set_other": {"priority": 0, "active": 0},
-    "mark_good": {"successful": 1, "unbootable": 0},
+    "arm": {"successful": 0, "unbootable": 0, "retry": 7},
 }
 
 ME = "microos-slot"
 PARTLABEL = "/dev/disk/by-partlabel"
 SYSBLOCK = "/sys/class/block"
 TEST = os.environ.get("MICROOS_SLOT_TEST") == "1"
-CONF = os.environ.get("MICROOS_SLOT_CONF", "/usr/lib/microos/slot.conf") if TEST else "/usr/lib/microos/slot.conf"
+TREE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+OWN_CONF = os.path.join(TREE, "usr/lib/microos/slot.conf")
+CONF = os.environ.get("MICROOS_SLOT_CONF", OWN_CONF) if TEST else OWN_CONF
+SAVES = os.environ.get("MICROOS_SLOT_STATE", "/var/lib/microos/gpt") if TEST else "/var/lib/microos/gpt"
 DISKS = os.environ.get("MICROOS_SLOT_DISKS", "") if TEST else ""
 BLOCK = os.environ.get("MICROOS_SLOT_BLOCK_SIZE", "") if TEST else ""
 FAIL = os.environ.get("MICROOS_SLOT_FAIL", "") if TEST else ""
@@ -173,7 +176,7 @@ def read_gpt(fd, block, numbers):
         if numbers[slot] is not None and numbers[slot] != found[0] + 1:
             raise Refuse(f"{label} is partition {numbers[slot]}, GPT entry {found[0] + 1}")
         index[slot] = found[0]
-    if primary["hsize"] != backup["hsize"] or primary["header"][40:72] != backup["header"][40:72] \
+    if primary["header"][8:16] != backup["header"][8:16] or primary["header"][40:72] != backup["header"][40:72] \
             or primary["header"][80:88] != backup["header"][80:88]:
         raise Refuse("primary and backup GPT headers differ")
     p, b = bytearray(primary["entries"]), bytearray(backup["entries"])
@@ -188,6 +191,10 @@ def attrs(copy, index):
     return {s: copy["entries"][attr_offset(copy, i)] for s, i in index.items()}
 
 
+def regions(copy, block):
+    return [(copy["lba"] * block, bytes(copy["header"])), (copy["entries_lba"] * block, bytes(copy["entries"]))]
+
+
 def store(fd, copy, index, values, block):
     entries = bytearray(copy["entries"])
     for s, i in index.items():
@@ -199,7 +206,52 @@ def store(fd, copy, index, values, block):
     pwrite(fd, entries, copy["entries_lba"] * block)
     pwrite(fd, header, copy["lba"] * block)
     os.fsync(fd)
-    return header, entries
+    return regions(dict(copy, header=header, entries=entries), block)
+
+
+def direct_read(disk, offset, size, block):
+    length = (size + block - 1) // block * block
+    buf = mmap.mmap(-1, length)
+    fd = os.open(disk, os.O_RDONLY | os.O_DIRECT | os.O_CLOEXEC)
+    try:
+        if os.preadv(fd, [buf], offset) != length:
+            raise Refuse(f"short direct read at {offset}")
+        return bytes(buf[:size])
+    finally:
+        os.close(fd)
+        buf.close()
+
+
+def matches(disk, wrote, block):
+    return all(direct_read(disk, offset, len(data), block) == data for offset, data in wrote)
+
+
+def save(saved):
+    os.makedirs(SAVES, mode=0o700, exist_ok=True)
+    used = [int(n[4:]) for n in os.listdir(SAVES) if n.startswith("pre-") and n[4:].isdigit()]
+    path = os.path.join(SAVES, f"pre-{max(used, default=0) + 1}")
+    os.mkdir(path, 0o700)
+    with open(os.path.join(path, "offsets"), "w") as offsets:
+        for n, (offset, data) in enumerate(saved):
+            with open(os.path.join(path, f"{n}.bin"), "wb") as f:
+                f.write(data)
+                os.fsync(f.fileno())
+            offsets.write(f"{n}.bin {offset}\n")
+        os.fsync(offsets.fileno())
+    return path
+
+
+def prune(keep=8):
+    used = sorted(int(n[4:]) for n in os.listdir(SAVES) if n.startswith("pre-") and n[4:].isdigit())
+    for n in used[:-keep]:
+        shutil.rmtree(os.path.join(SAVES, f"pre-{n}"))
+
+
+def restore(fd, disk, saved, block):
+    for offset, data in saved:
+        pwrite(fd, data, offset)
+    os.fsync(fd)
+    return matches(disk, saved, block)
 
 
 def slot_conf():
@@ -221,30 +273,27 @@ def status(disk, block, primary, backup, index):
     if p == b:
         print("gpt: ok")
     else:
-        print("gpt: torn, the backup holds a write the primary lacks; set or mark-good completes it")
+        print("gpt: the backup differs in the slot attributes, the primary is current; arm rewrites both")
     for s in index:
-        print(f"{s} {LAYOUT['slots'][s]}: {describe(b[s])}")
+        print(f"{s} {LAYOUT['slots'][s]}: {describe(p[s])}")
     if p != b:
         for s in index:
-            print(f"{s} {LAYOUT['slots'][s]} primary: {describe(p[s])}")
+            print(f"{s} {LAYOUT['slots'][s]} backup: {describe(b[s])}")
 
 
-def change(cmd, arg, current):
+def change(current):
     new = dict(current)
-    if cmd == "mark-good":
-        s = LAYOUT["microos_slot"]
-        new[s] = apply(new[s], LAYOUT["mark_good"])
-    else:
-        for s in new:
-            new[s] = apply(new[s], LAYOUT["set_target"] if s == arg else LAYOUT["set_other"])
+    s = LAYOUT["microos_slot"]
+    if not field(new[s], "active"):
+        raise Refuse(f"{LAYOUT['slots'][s]} is not active")
+    new[s] = apply(new[s], LAYOUT["arm"])
     return new
 
 
 def main(argv):
     cmd = argv[0] if argv else ""
-    if not (cmd == "status" and len(argv) == 1 or cmd == "mark-good" and len(argv) == 1
-            or cmd == "set" and len(argv) == 2 and argv[1] in LAYOUT["slots"]):
-        print(f"usage: {ME} status | mark-good | set a|b", file=sys.stderr)
+    if cmd not in ("status", "arm") or len(argv) != 1:
+        print(f"usage: {ME} status | arm", file=sys.stderr)
         return 2
     disk, block, numbers = locate()
     writing = cmd != "status"
@@ -258,19 +307,33 @@ def main(argv):
         if not writing:
             status(disk, block, primary, backup, index)
             return 0
-        current = attrs(backup, index)
-        new = change(cmd, argv[1] if cmd == "set" else None, current)
-        if new == current and attrs(primary, index) == current:
+        current = attrs(primary, index)
+        new = change(current)
+        if new == current and attrs(backup, index) == current:
             print(f"{ME}: unchanged")
             return 0
-        wrote = [store(fd, backup, index, new, block)]
-        if FAIL == "after-backup":
-            raise Refuse("fail point after the backup write")
-        wrote.append(store(fd, primary, index, new, block))
-        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-        primary, backup, index = read_gpt(fd, block, numbers)
-        if [(backup["header"], backup["entries"]), (primary["header"], primary["entries"])] != wrote:
-            raise Refuse("read back differs from the write")
+        saved = regions(backup, block) + regions(primary, block)
+        try:
+            print(f"{ME}: saved both copies to {save(saved)}")
+        except OSError as e:
+            raise Refuse(f"copies not saved under {SAVES}, nothing written: {e}")
+        for copy in (backup, primary):
+            wrote = store(fd, copy, index, new, block)
+            if FAIL == f"corrupt-{copy['name']}":
+                at = copy["entries_lba"] * block + attr_offset(copy, index["a"])
+                pwrite(fd, bytes([pread(fd, 1, at)[0] ^ 1]), at)
+                os.fsync(fd)
+            if not matches(disk, wrote, block):
+                if restore(fd, disk, saved, block):
+                    raise Refuse(f"{copy['name']} read back differs from the write, both copies restored")
+                raise Refuse(f"{copy['name']} read back differs from the write, and the restore did not read back")
+            if FAIL == "after-backup":
+                raise Refuse("fail point after the backup write")
+        read_gpt(fd, block, numbers)
+        try:
+            prune()
+        except OSError as e:
+            print(f"{ME}: old copies under {SAVES} not pruned: {e}", file=sys.stderr)
         for s in index:
             print(f"{s} {LAYOUT['slots'][s]}: {describe(new[s])}")
         return 0
