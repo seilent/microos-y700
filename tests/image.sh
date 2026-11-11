@@ -36,7 +36,7 @@ done
 grep -qx 'install_weak_deps=False' /etc/dnf/libdnf5.conf.d/10-microos.conf || fail "10-microos.conf does not turn off weak deps"
 [[ -z $(rpm -qa '*-debuginfo' '*-debugsource') ]] || fail "debug rpms installed: $(rpm -qa '*-debuginfo' '*-debugsource' | tr '\n' ' ')"
 own=$(rpm -qa --qf '%{NAME}\t%{VENDOR}\n' | awk -F'\t' '$2 == "MicroOS" { print $1 }' | LC_ALL=C sort | paste -sd' ')
-[[ $own == 'gamescope gamescope-session gamescope-session-steam microos-kernel' ]] || fail "MicroOS rpms: $own"
+[[ $own == 'audioreach-topology gamescope gamescope-session gamescope-session-steam microos-kernel' ]] || fail "MicroOS rpms: $own"
 for p in qbootctl inputplumber steamos-manager microset mangohud lsfg-vk hexagonrpc microos-eq libfreeaptx \
   pipewire-codec-aptx microos-android-guestos microos-steam-seed; do
   ! rpm -q "$p" >/dev/null 2>&1 || fail "$p is installed"
@@ -193,6 +193,8 @@ grep -qxF '	File "/Qualcomm/sm8650/TB321FU/HiFi.conf"' /usr/share/alsa/ucm2/conf
   || fail "TB321FU UCM card file"
 grep -qF "cset \"name='SEC_TDM_RX_0 Audio Mixer MultiMedia2' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
   || fail "TB321FU UCM speaker route"
+[[ $(rpm -qf /usr/lib/firmware/qcom/sm8650/Lenovo-Y700-TB321FU-tplg.bin 2>/dev/null) == audioreach-topology-* ]] \
+  || fail "TB321FU topology is not from audioreach-topology"
 [[ -z $ucm ]] || fail "PM2 UCM files in the image: $ucm"
 ! grep -qs '^micro:' /etc/subuid /etc/subgid || fail "micro has subordinate ids"
 words=$(grep -lIiE 'PocketMICRO2|sm8250|ayaneo|aya-keys|fastrpc-sdsp|mmcblk' "${ours[@]}" || true)

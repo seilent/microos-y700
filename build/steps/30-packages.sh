@@ -5,6 +5,7 @@ install -d /etc/dnf/libdnf5.conf.d
 printf '[main]\ninstall_weak_deps=False\n' > /etc/dnf/libdnf5.conf.d/10-microos.conf
 
 own=(
+  audioreach-topology/audioreach-topology
   gamescope/gamescope
   gamescope-session/gamescope-session
   gamescope-session/gamescope-session-steam
