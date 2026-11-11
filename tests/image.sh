@@ -307,15 +307,12 @@ esp=$tmp/esp
 mkdir -p "$esp/microos"
 printf '[connection]\nid=home\ntype=wifi\n' > "$esp/microos/home.nmconnection"
 printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA test\n' > "$esp/microos/authorized_keys"
-printf 'pw:with colon\n' > "$esp/microos/password"
 env MICROOS_ESP="$esp" MICROOS_RUNDIR="$tmp/run" MICROOS_NMDIR="$tmp/nm" MICROOS_HOME="$tmp/home" \
   /usr/libexec/microos/microos-provision >/dev/null || fail "provision failed"
 [[ -z $(ls -A "$esp/microos") ]] || fail "provision left files on the ESP: $(ls -A "$esp/microos")"
 [[ $(stat -c '%a %U' "$tmp/nm/home.nmconnection") == '600 root' ]] || fail "nmconnection mode"
 [[ $(stat -c '%a %U' "$tmp/home/.ssh") == '700 micro' ]] || fail ".ssh mode"
 [[ $(stat -c '%a %U' "$tmp/home/.ssh/authorized_keys") == '600 micro' ]] || fail "authorized_keys mode"
-hash=$(getent shadow micro | cut -d: -f2)
-[[ $hash == \$* ]] || fail "micro password not set"
 [[ -e $tmp/run/bootimg.lock ]] || fail "provision did not take the bootimg lock"
 
 printf '[connection]\nid=kept\n' > "$esp/microos/kept.nmconnection"

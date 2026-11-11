@@ -52,16 +52,4 @@ if [[ -f $f ]]; then
   fi
 fi
 
-f=$src/password
-if [[ -f $f ]]; then
-  pw=
-  IFS= read -r pw < "$f" || [[ -n $pw ]]
-  pw=${pw%$'\r'}
-  if [[ -n $pw ]] && printf '%s:%s\n' "$user" "$pw" | chpasswd; then
-    done_with "$f"
-  else
-    failed "$f"
-  fi
-fi
-
 exit "$rc"
