@@ -34,11 +34,12 @@ for p in qbootctl gamescope gamescope-session inputplumber steamos-manager micro
   ! rpm -q "$p" >/dev/null 2>&1 || fail "$p is installed"
 done
 
-for u in bootloader-update.service systemd-backlight@.service systemd-hibernate.service systemd-hybrid-sleep.service \
+for u in bootloader-update.service systemd-repart.service systemd-backlight@.service systemd-hibernate.service systemd-hybrid-sleep.service \
   systemd-suspend-then-hibernate.service bootc-fetch-apply-updates.timer bootc-generic-growpart.service \
   microos-update-check.timer; do
   [[ $(readlink "/etc/systemd/system/$u") == /dev/null ]] || fail "$u is not masked"
 done
+[[ -z $(compgen -G '/usr/lib/repart.d/*') ]] || fail "repart.d holds definitions: $(ls /usr/lib/repart.d)"
 [[ $(readlink /etc/systemd/user/mpris-proxy.service) == /dev/null ]] || fail "user mpris-proxy.service is not masked"
 
 tests=(microos-test-bootloader.service microos-test-emergency.service microos-test-gptdump.service microos-test-panic.service
