@@ -6,15 +6,20 @@ mods=(/usr/lib/modules/*)
 kver=${mods[0]##*/}
 img=/usr/lib/modules/$kver/initramfs.img
 
-kdir=/usr/lib/modules/$kver/kernel/drivers
-omit=$(find "$kdir/gpu" "$kdir/pwm" "$kdir/video/backlight" -name '*.ko*' -printf '%f\n' | sed 's/\.ko.*//' | sort -u | tr '\n' ' ')
-
 mkdir -p /var/roothome
-dracut --no-hostonly --reproducible --add "ostree microos-ostree-remap microos-y700-guard" --omit-drivers "$omit" --force "$img" "$kver"
+dracut --no-hostonly --reproducible \
+  -m "systemd systemd-initrd dracut-systemd base fs-lib rootfs-block udev-rules shutdown ostree microos-ostree-remap microos-y700-guard" \
+  -o "kernel-modules bootc virtiofs lvm crypt fips tpm2-tss clevis clevis-pin-tpm2 nss-softokn" \
+  --drivers "btrfs nvmem-qcom-spmi-sdam" --compress "zstd -19" --force "$img" "$kver"
 
+want="base dracut-systemd fs-lib microos-ostree-remap microos-y700-guard ostree rootfs-block shutdown systemd \
+systemd-ask-password systemd-initrd systemd-journald systemd-modules-load systemd-sysctl systemd-sysusers systemd-tmpfiles \
+systemd-udevd udev-rules"
+got=$(lsinitrd -m "$img" | sed '1,/^dracut modules:$/d;/^=/,$d' | LC_ALL=C sort | xargs)
+[[ $got == "$want" ]] || { echo "50-initramfs: dracut modules $got" >&2; exit 1; }
 list=$(lsinitrd "$img")
 builtin=$(cat "/usr/lib/modules/$kver/modules.builtin")
-for m in erofs overlay btrfs sdhci-msm ufs-qcom vfat nvmem_qcom-spmi-sdam; do
+for m in erofs overlay btrfs ufs-qcom vfat nvmem_qcom-spmi-sdam; do
   grep -qE "/$m\.ko" <<< "$list" || grep -qE "/$m\.ko$" <<< "$builtin" || { echo "50-initramfs: $m missing" >&2; exit 1; }
 done
 for f in usr/lib/ostree/ostree-prepare-root usr/libexec/microos/prepare-root usr/bin/sh usr/bin/realpath usr/bin/mkdir \
@@ -33,12 +38,16 @@ grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || { e
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
   $'[Service]\nExecStart=\nExecStart=systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd' ]] \
   || { echo "50-initramfs: initrd-switch-root drop-in" >&2; exit 1; }
-if grep -qE "/kernel/drivers/(gpu|pwm|video/backlight)/.*\.ko" <<< "$list"; then
-  echo "50-initramfs: GPU, PWM or backlight module in the initramfs" >&2
+if grep -qE " usr/(s?bin)/(vi|fsck\.[a-z0-9]+|xfs_repair)( |$)" <<< "$list"; then
+  echo "50-initramfs: vi or fsck tools in the initramfs" >&2
+  exit 1
+fi
+if grep -qE "/kernel/drivers/gpu/" <<< "$list"; then
+  echo "50-initramfs: GPU module in the initramfs" >&2
   exit 1
 fi
 
-base=49006320
+max=15728640
 size=$(stat -c %s "$img")
-echo "50-initramfs: $img $size bytes, base $base"
-(( size - base <= 4194304 )) || { echo "50-initramfs: initramfs grew $((size - base)) bytes over $base, limit 4194304" >&2; exit 1; }
+echo "50-initramfs: $img $size bytes, limit $max"
+(( size <= max )) || { echo "50-initramfs: initramfs is $size bytes, over $max" >&2; exit 1; }

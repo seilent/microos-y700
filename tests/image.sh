@@ -74,6 +74,7 @@ kept=(
   /usr/lib/NetworkManager/conf.d/10-microos.conf
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
+  /usr/lib/dracut/dracut.conf.d/90-microos.conf
   /usr/lib/dracut/modules.d/91microos-ostree-remap/module-setup.sh
   /usr/lib/dracut/modules.d/91microos-ostree-remap/prepare-root.conf
   /usr/lib/dracut/modules.d/92microos-y700-guard/cmdline.conf
@@ -235,17 +236,18 @@ grep -q '(ALL) ALL' <<< "$rules" || fail "micro has no wheel sudo rule"
 
 img=/usr/lib/modules/$kver/initramfs.img
 list=$(lsinitrd "$img")
-for m in erofs overlay btrfs sdhci-msm ufs-qcom; do
+for m in erofs overlay btrfs ufs-qcom; do
   grep -qE "/$m\.ko" <<< "$list" || grep -qE "/$m\.ko$" "/usr/lib/modules/$kver/modules.builtin" || fail "initramfs lacks $m"
 done
 dropin=usr/lib/systemd/system/ostree-prepare-root.service.d/10-microos-remap.conf
 for f in usr/lib/ostree/ostree-prepare-root usr/libexec/microos/prepare-root usr/bin/sh usr/bin/realpath usr/bin/mkdir "$dropin"; do
   grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
 done
-! grep -qE "/kernel/drivers/(gpu|pwm|video/backlight)/.*\.ko" <<< "$list" || fail "initramfs has a GPU, PWM or backlight module"
+! grep -qE "/kernel/drivers/gpu/" <<< "$list" || fail "initramfs has a GPU module"
+(( $(stat -c %s "$img") <= 15728640 )) || fail "initramfs is $(stat -c %s "$img") bytes, over 15728640"
 [[ $(lsinitrd -f "$dropin" "$img") == $'[Service]\nExecStart=\nExecStart=/usr/libexec/microos/prepare-root' ]] || fail "remap drop-in content"
-for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-log usr/lib/systemd/system/microos-guard.service \
-  etc/microos-initrd-id usr/lib/systemd/system/emergency.service.d/10-microos.conf \
+for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-log usr/libexec/microos/microos-sdam \
+  usr/lib/systemd/system/microos-guard.service etc/microos-initrd-id usr/lib/systemd/system/emergency.service.d/10-microos.conf \
   usr/lib/systemd/system/dracut-emergency.service.d/10-microos.conf; do
   grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
 done
