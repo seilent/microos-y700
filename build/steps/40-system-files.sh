@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cp -a /ctx/system_files/. /
+chmod 600 /usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 
 while read -r t u g; do
   if [[ $t == m && $u == micro ]] && ! grep -q "^$g:" /etc/group; then
