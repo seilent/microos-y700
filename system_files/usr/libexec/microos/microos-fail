@@ -7,6 +7,7 @@ cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 rundir=${MICROOS_RUNDIR:-/run/microos}
 slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
 efilog=${MICROOS_EFI_LOG:-/usr/libexec/microos/microos-efi-log}
+sdamlib=${MICROOS_SDAM_LIB:-/usr/libexec/microos/microos-sdam}
 say() { echo "$me: $*" >&2; }
 
 why=${1:-}
@@ -25,11 +26,12 @@ MICROOS_BOOT_TRIES=3
 [[ -r $conf ]] && . "$conf"
 
 efi=${MICROOS_EFI:-/boot/efi}
-if [[ -z ${MICROOS_EFI:-} ]] && ! mountpoint -q "$efi" && ! mount "$efi"; then
+if [[ -z ${MICROOS_EFI:-} ]] && ! mountpoint -q "$efi" && ! timeout 30 mount "$efi"; then
   say "$efi is not mounted, no log and no count"
   efi=""
 fi
 
+switched=0
 if [[ -n $efi ]]; then
   MICROOS_EFI=$efi "$efilog" "$why" || say "no $why log on $efi"
   id=""
@@ -51,8 +53,18 @@ if [[ -n $efi ]]; then
     elif "$slot" set a; then
       { echo "$id 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; } || say "cannot reset $f"
       say "slot a selected, counter reset"
+      switched=1
     else
       say "microos-slot set a failed"
+    fi
+    if (( ! switched )); then
+      if [[ -r $sdamlib ]] && . "$sdamlib" && sdam_find && sdam_put preset; then
+        say "fastboot preset written in ${sdam##*/}, rebooting into the bootloader"
+        sync
+        systemctl reboot --reboot-argument=bootloader || systemctl --force reboot --reboot-argument=bootloader
+        exit 0
+      fi
+      say "no fastboot preset, plain reboot"
     fi
   fi
 fi
