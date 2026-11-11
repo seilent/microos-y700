@@ -1,0 +1,329 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seilent <github@seilent.net>
+Date: Thu, 12 Nov 2026 05:58:28 +0900
+Subject: [PATCH] Input: aw86927 - add support for AW86937
+
+The AW86937 (chip ID 0x9370) shares the AW86938 boost configuration
+layout in PLAYCFG1, but keeps its test mode lock at 0x5e and has a
+different set of analog trim registers behind it. It has no CONTCFG13
+and no boost peak current setting in ANACFG13, and its INTN pin only
+signals interrupts when SYSCTRL4 bit 7 is set.
+
+Detect the chip, program its analog trims and UVLO threshold under its
+own test mode lock, skip the AW86927 only registers, route INTN to the
+interrupt function and set the boost output to 8.5 V.
+
+Signed-off-by: seilent <github@seilent.net>
+---
+ drivers/input/misc/aw86927.c | 199 ++++++++++++++++++++++++++---------
+ 1 file changed, 149 insertions(+), 50 deletions(-)
+
+diff --git a/drivers/input/misc/aw86927.c b/drivers/input/misc/aw86927.c
+index 0657c52b4..bd10e7948 100644
+--- a/drivers/input/misc/aw86927.c
++++ b/drivers/input/misc/aw86927.c
+@@ -49,6 +49,8 @@
+ #define AW86938_PLAYCFG1_BST_VOUT_VREFSET_MASK	GENMASK(4, 0)
+ #define AW86938_PLAYCFG1_BST_7000MV		0x11
+ 
++#define AW86937_PLAYCFG1_BST_8500MV		0x0f
++
+ #define AW86927_PLAYCFG2_REG			0x07
+ 
+ #define AW86927_PLAYCFG3_REG			0x08
+@@ -109,6 +111,7 @@
+ #define AW86927_SYSCTRL3_EN_RAMINIT_OFF         0
+ 
+ #define AW86927_SYSCTRL4_REG			0x46
++#define AW86937_SYSCTRL4_INTN_PIN_INT		BIT(7)
+ #define AW86927_SYSCTRL4_WAVDAT_MODE_MASK	GENMASK(6, 5)
+ #define AW86927_SYSCTRL4_WAVDAT_24K		0
+ #define AW86927_SYSCTRL4_INT_EDGE_MODE_MASK	GENMASK(4, 4)
+@@ -146,12 +149,25 @@
+ #define AW86927_CHIPIDH_REG			0x57
+ #define AW86927_CHIPIDL_REG			0x58
+ #define AW86927_CHIPID				0x9270
++#define AW86937_CHIPID				0x9370
+ #define AW86938_CHIPID				0x9380
+ 
++#define AW86937_SYSCTRL6_REG			0x56
++#define AW86937_SYSCTRL6_UVLO_ADJ_MASK		GENMASK(1, 0)
++#define AW86937_SYSCTRL6_UVLO_ADJ_2P4V		0
++
+ #define AW86927_TMCFG_REG			0x5b
+ #define AW86927_TMCFG_UNLOCK			0x7d
+ #define AW86927_TMCFG_LOCK			0x00
+ 
++#define AW86937_TMCFG_REG			0x5e
++
++#define AW86937_ANACFG7_REG			0x6f
++#define AW86937_ANACFG8_REG			0x70
++#define AW86937_ANACFG10_REG			0x72
++#define AW86937_ANACFG15_REG			0x77
++#define AW86937_ANACFG21_REG			0x7d
++
+ #define AW86927_ANACFG11_REG			0x70
+ 
+ #define AW86927_ANACFG12_REG			0x71
+@@ -182,6 +198,7 @@ enum aw86927_work_mode {
+ 
+ enum aw86927_model {
+ 	AW86927,
++	AW86937,
+ 	AW86938,
+ };
+ 
+@@ -286,11 +303,18 @@ static int aw86927_play_mode(struct aw86927_data *haptics, u8 play_mode)
+ 		if (err)
+ 			return err;
+ 
+-		err = regmap_update_bits(haptics->regmap,
+-					 AW86927_PLAYCFG1_REG,
+-					 AW86927_PLAYCFG1_BST_MODE_MASK,
+-					 FIELD_PREP(AW86927_PLAYCFG1_BST_MODE_MASK,
+-						    AW86927_PLAYCFG1_BST_MODE_BYPASS));
++		if (haptics->model == AW86937)
++			err = regmap_update_bits(haptics->regmap,
++						 AW86938_PLAYCFG1_REG,
++						 AW86938_PLAYCFG1_BST_MODE_MASK,
++						 FIELD_PREP(AW86938_PLAYCFG1_BST_MODE_MASK,
++							    AW86938_PLAYCFG1_BST_MODE_BYPASS));
++		else
++			err = regmap_update_bits(haptics->regmap,
++						 AW86927_PLAYCFG1_REG,
++						 AW86927_PLAYCFG1_BST_MODE_MASK,
++						 FIELD_PREP(AW86927_PLAYCFG1_BST_MODE_MASK,
++							    AW86927_PLAYCFG1_BST_MODE_BYPASS));
+ 		if (err)
+ 			return err;
+ 
+@@ -443,27 +467,10 @@ static void aw86927_hw_reset(struct aw86927_data *haptics)
+ 	usleep_range(8000, 8500);
+ }
+ 
+-static int aw86927_haptic_init(struct aw86927_data *haptics)
++static int aw86927_anacfg_init(struct aw86927_data *haptics)
+ {
+ 	int err;
+ 
+-	err = regmap_update_bits(haptics->regmap,
+-				 AW86927_SYSCTRL4_REG,
+-				 AW86927_SYSCTRL4_WAVDAT_MODE_MASK,
+-				 FIELD_PREP(AW86927_SYSCTRL4_WAVDAT_MODE_MASK,
+-					    AW86927_SYSCTRL4_WAVDAT_24K));
+-	if (err)
+-		return err;
+-
+-	/* enable gain bypass */
+-	err = regmap_update_bits(haptics->regmap,
+-				 AW86927_SYSCTRL4_REG,
+-				 AW86927_SYSCTRL4_GAIN_BYPASS_MASK,
+-				 FIELD_PREP(AW86927_SYSCTRL4_GAIN_BYPASS_MASK,
+-					    0x01));
+-	if (err)
+-		return err;
+-
+ 	err = regmap_write(haptics->regmap,
+ 			   AW86927_TMCFG_REG, AW86927_TMCFG_UNLOCK);
+ 	if (err)
+@@ -497,8 +504,76 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
+ 	if (err)
+ 		return err;
+ 
++	return regmap_write(haptics->regmap,
++			    AW86927_TMCFG_REG, AW86927_TMCFG_LOCK);
++}
++
++static int aw86937_anacfg_init(struct aw86927_data *haptics)
++{
++	int err;
++
+ 	err = regmap_write(haptics->regmap,
+-			   AW86927_TMCFG_REG, AW86927_TMCFG_LOCK);
++			   AW86937_TMCFG_REG, AW86927_TMCFG_UNLOCK);
++	if (err)
++		return err;
++
++	err = regmap_update_bits(haptics->regmap,
++				 AW86937_SYSCTRL6_REG,
++				 AW86937_SYSCTRL6_UVLO_ADJ_MASK,
++				 FIELD_PREP(AW86937_SYSCTRL6_UVLO_ADJ_MASK,
++					    AW86937_SYSCTRL6_UVLO_ADJ_2P4V));
++	if (err)
++		return err;
++
++	err = regmap_write(haptics->regmap, AW86937_ANACFG7_REG, 0x1c);
++	if (err)
++		return err;
++
++	err = regmap_write(haptics->regmap, AW86937_ANACFG8_REG, 0x0e);
++	if (err)
++		return err;
++
++	err = regmap_write(haptics->regmap, AW86937_ANACFG10_REG, 0x03);
++	if (err)
++		return err;
++
++	err = regmap_write(haptics->regmap, AW86937_ANACFG15_REG, 0x80);
++	if (err)
++		return err;
++
++	err = regmap_write(haptics->regmap, AW86937_ANACFG21_REG, 0x41);
++	if (err)
++		return err;
++
++	return regmap_write(haptics->regmap,
++			    AW86937_TMCFG_REG, AW86927_TMCFG_LOCK);
++}
++
++static int aw86927_haptic_init(struct aw86927_data *haptics)
++{
++	int err;
++
++	err = regmap_update_bits(haptics->regmap,
++				 AW86927_SYSCTRL4_REG,
++				 AW86927_SYSCTRL4_WAVDAT_MODE_MASK,
++				 FIELD_PREP(AW86927_SYSCTRL4_WAVDAT_MODE_MASK,
++					    AW86927_SYSCTRL4_WAVDAT_24K));
++	if (err)
++		return err;
++
++	/* enable gain bypass */
++	err = regmap_update_bits(haptics->regmap,
++				 AW86927_SYSCTRL4_REG,
++				 AW86927_SYSCTRL4_GAIN_BYPASS_MASK,
++				 FIELD_PREP(AW86927_SYSCTRL4_GAIN_BYPASS_MASK,
++					    0x01));
++	if (err)
++		return err;
++
++	if (haptics->model == AW86937)
++		err = aw86937_anacfg_init(haptics);
++	else
++		err = aw86927_anacfg_init(haptics);
+ 	if (err)
+ 		return err;
+ 
+@@ -523,12 +598,14 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
+ 	if (err)
+ 		return err;
+ 
+-	err = regmap_write(haptics->regmap,
+-			   AW86927_CONTCFG13_REG,
+-			   FIELD_PREP(AW86927_CONTCFG13_TSET_MASK, 0x06) |
+-				FIELD_PREP(AW86927_CONTCFG13_BEME_SET_MASK, 0x02));
+-	if (err)
+-		return err;
++	if (haptics->model != AW86937) {
++		err = regmap_write(haptics->regmap,
++				   AW86927_CONTCFG13_REG,
++				   FIELD_PREP(AW86927_CONTCFG13_TSET_MASK, 0x06) |
++					FIELD_PREP(AW86927_CONTCFG13_BEME_SET_MASK, 0x02));
++		if (err)
++			return err;
++	}
+ 
+ 	err = regmap_update_bits(haptics->regmap,
+ 				 AW86927_DETCFG2_REG,
+@@ -560,23 +637,25 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
+ 	if (err)
+ 		return err;
+ 
+-	err = regmap_write(haptics->regmap,
+-			   AW86927_TMCFG_REG, AW86927_TMCFG_UNLOCK);
+-	if (err)
+-		return err;
++	if (haptics->model != AW86937) {
++		err = regmap_write(haptics->regmap,
++				   AW86927_TMCFG_REG, AW86927_TMCFG_UNLOCK);
++		if (err)
++			return err;
+ 
+-	err = regmap_update_bits(haptics->regmap,
+-				 AW86927_ANACFG13_REG,
+-				 AW86927_ANACFG13_BST_PC_MASK,
+-				 FIELD_PREP(AW86927_ANACFG13_BST_PC_MASK,
+-					    AW86927_ANACFG13_BST_PEAKCUR_3P45A));
+-	if (err)
+-		return err;
++		err = regmap_update_bits(haptics->regmap,
++					 AW86927_ANACFG13_REG,
++					 AW86927_ANACFG13_BST_PC_MASK,
++					 FIELD_PREP(AW86927_ANACFG13_BST_PC_MASK,
++						    AW86927_ANACFG13_BST_PEAKCUR_3P45A));
++		if (err)
++			return err;
+ 
+-	err = regmap_write(haptics->regmap,
+-			   AW86927_TMCFG_REG, AW86927_TMCFG_LOCK);
+-	if (err)
+-		return err;
++		err = regmap_write(haptics->regmap,
++				   AW86927_TMCFG_REG, AW86927_TMCFG_LOCK);
++		if (err)
++			return err;
++	}
+ 
+ 	switch (haptics->model) {
+ 	case AW86927:
+@@ -588,6 +667,15 @@ static int aw86927_haptic_init(struct aw86927_data *haptics)
+ 		if (err)
+ 			return err;
+ 		break;
++	case AW86937:
++		err = regmap_update_bits(haptics->regmap,
++					 AW86938_PLAYCFG1_REG,
++					 AW86938_PLAYCFG1_BST_VOUT_VREFSET_MASK,
++					 FIELD_PREP(AW86938_PLAYCFG1_BST_VOUT_VREFSET_MASK,
++						    AW86937_PLAYCFG1_BST_8500MV));
++		if (err)
++			return err;
++		break;
+ 	case AW86938:
+ 		err = regmap_update_bits(haptics->regmap,
+ 					 AW86938_PLAYCFG1_REG,
+@@ -750,6 +838,9 @@ static int aw86927_detect(struct aw86927_data *haptics)
+ 	case AW86927_CHIPID:
+ 		haptics->model = AW86927;
+ 		break;
++	case AW86937_CHIPID:
++		haptics->model = AW86937;
++		break;
+ 	case AW86938_CHIPID:
+ 		haptics->model = AW86938;
+ 		break;
+@@ -764,6 +855,7 @@ static int aw86927_detect(struct aw86927_data *haptics)
+ static int aw86927_probe(struct i2c_client *client)
+ {
+ 	struct aw86927_data *haptics;
++	unsigned int val;
+ 	int err;
+ 
+ 	haptics = devm_kzalloc_obj(&client->dev, struct aw86927_data);
+@@ -805,11 +897,18 @@ static int aw86927_probe(struct i2c_client *client)
+ 		return dev_err_probe(haptics->dev, err, "Failed to find chip\n");
+ 
+ 	/* IRQ config */
+-	err = regmap_write(haptics->regmap, AW86927_SYSCTRL4_REG,
+-			   FIELD_PREP(AW86927_SYSCTRL4_INT_MODE_MASK,
+-				      AW86927_SYSCTRL4_INT_MODE_EDGE) |
+-				FIELD_PREP(AW86927_SYSCTRL4_INT_EDGE_MODE_MASK,
+-					   AW86927_SYSCTRL4_INT_EDGE_MODE_POS));
++	val = FIELD_PREP(AW86927_SYSCTRL4_INT_MODE_MASK,
++			 AW86927_SYSCTRL4_INT_MODE_EDGE) |
++	      FIELD_PREP(AW86927_SYSCTRL4_INT_EDGE_MODE_MASK,
++			 AW86927_SYSCTRL4_INT_EDGE_MODE_POS);
++	if (haptics->model == AW86937)
++		err = regmap_update_bits(haptics->regmap, AW86927_SYSCTRL4_REG,
++					 AW86937_SYSCTRL4_INTN_PIN_INT |
++						AW86927_SYSCTRL4_INT_EDGE_MODE_MASK |
++						AW86927_SYSCTRL4_INT_MODE_MASK,
++					 AW86937_SYSCTRL4_INTN_PIN_INT | val);
++	else
++		err = regmap_write(haptics->regmap, AW86927_SYSCTRL4_REG, val);
+ 	if (err)
+ 		return dev_err_probe(haptics->dev, err, "Failed to configure interrupt modes\n");
+ 
+-- 
+2.55.0
+
