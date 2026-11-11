@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+me=microos-fail
+conf=${MICROOS_SLOT_CONF:-/usr/lib/microos/slot.conf}
+cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
+rundir=${MICROOS_RUNDIR:-/run/microos}
+slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
+efilog=${MICROOS_EFI_LOG:-/usr/libexec/microos/microos-efi-log}
+say() { echo "$me: $*" >&2; }
+
+why=${1:-}
+[[ $why == emergency || $why == deadline ]] || { echo "usage: $me emergency|deadline" >&2; exit 2; }
+
+if [[ $why == deadline ]]; then
+  if [[ -f $rundir/boot-confirmed ]]; then
+    say "boot confirmed, no deadline reboot"
+    exit 0
+  fi
+  say "boot not confirmed: no $rundir/boot-confirmed"
+fi
+
+MICROOS_SLOT_WRITE=0
+MICROOS_BOOT_TRIES=3
+[[ -r $conf ]] && . "$conf"
+
+efi=${MICROOS_EFI:-/boot/efi}
+if [[ -z ${MICROOS_EFI:-} ]] && ! mountpoint -q "$efi" && ! mount "$efi"; then
+  say "$efi is not mounted, no log and no count"
+  efi=""
+fi
+
+if [[ -n $efi ]]; then
+  MICROOS_EFI=$efi "$efilog" "$why" || say "no $why log on $efi"
+  id=""
+  read -ra words < "$cmdline" || true
+  for w in "${words[@]}"; do
+    [[ $w != microos.id=* ]] || id=${w#microos.id=}
+  done
+  f=$efi/microos/boot-attempts
+  fid="" count=0
+  [[ -f $f ]] && read -r fid count < "$f"
+  [[ $count =~ ^[0-9]+$ ]] || count=0
+  [[ -n $id && $fid == "$id" ]] || count=0
+  say "${id:-no microos.id}, attempt $count of $MICROOS_BOOT_TRIES"
+  if (( count >= MICROOS_BOOT_TRIES )); then
+    if [[ $MICROOS_SLOT_WRITE != 1 ]]; then
+      say "slot writes are off, slot a not selected"
+    elif [[ ! -x $slot ]]; then
+      say "$slot is missing, slot a not selected"
+    elif "$slot" set a; then
+      { echo "$id 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; } || say "cannot reset $f"
+      say "slot a selected, counter reset"
+    else
+      say "microos-slot set a failed"
+    fi
+  fi
+fi
+
+sync
+systemctl reboot || systemctl --force reboot

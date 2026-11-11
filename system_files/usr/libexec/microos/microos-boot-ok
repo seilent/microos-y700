@@ -304,4 +304,5 @@ if (( was_listed )); then
 else
   write "$pins"
 fi
+write "$rundir/boot-confirmed" "$booted"
 echo "$me: confirmed $booted"
