@@ -203,6 +203,12 @@ grep -qF "cset \"name='SEC_TDM_RX_0 Audio Mixer MultiMedia2' 1\"" /usr/share/als
   || fail "TB321FU UCM speaker route"
 grep -qF "cset \"name='SpkrRight Playback Switch' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
   || fail "TB321FU UCM speaker amplifier controls"
+grep -qF "cset \"name='RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1' 1\"" /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf \
+  || fail "TB321FU UCM headphone route"
+for f in $(sed -n 's/^[[:space:]]*Include\.[a-z-]*\.File "\(.*\)"$/\1/p' /usr/share/alsa/ucm2/conf.d/sm8650/Lenovo-Y700-TB321FU.conf \
+  /usr/share/alsa/ucm2/Qualcomm/sm8650/TB321FU/HiFi.conf); do
+  [[ -f /usr/share/alsa/ucm2$f ]] || fail "TB321FU UCM includes missing $f"
+done
 [[ $(rpm -qf /usr/lib/firmware/qcom/sm8650/Lenovo-Y700-TB321FU-tplg.bin 2>/dev/null) == audioreach-topology-* ]] \
   || fail "TB321FU topology is not from audioreach-topology"
 [[ -z $ucm ]] || fail "PM2 UCM files in the image: $ucm"
@@ -375,6 +381,7 @@ grep -qx 'alias of:N\*T\*Cpci17cb,1107 pci_pwrctrl_pwrseq' "$alias" || fail "no 
 grep -qx 'alias of:N\*T\*Cnovatek,nt36523-ts novatek_nt36523' "$alias" || fail "no NT36523 touchscreen alias for novatek_nt36523"
 grep -qx 'alias of:N\*T\*Cawinic,aw88461 snd_soc_aw88261' "$alias" || fail "no AW88461 alias for snd_soc_aw88261"
 grep -qx 'alias of:N\*T\*Clenovo,tb321fu-sndcard snd_soc_sc8280xp' "$alias" || fail "no TB321FU sound card alias for snd_soc_sc8280xp"
+grep -qx 'alias of:N\*T\*Cqcom,wcd9390-codec snd_soc_wcd939x' "$alias" || fail "no WCD9390 alias for snd_soc_wcd939x"
 for f in amss m3 board-2; do
   compgen -G "/usr/lib/firmware/ath12k/WCN7850/hw2.0/$f.bin*" >/dev/null || fail "ath12k WCN7850 $f.bin missing"
 done

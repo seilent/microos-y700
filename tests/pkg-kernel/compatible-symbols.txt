@@ -168,10 +168,12 @@ qcom,tcsr-mutex HWSPINLOCK_QCOM
 qcom,trng HW_RANDOM_QCOM
 qcom,tsens-v2 QCOM_TSENS
 qcom,ufshc SCSI_UFS_QCOM
+qcom,wcd9390-codec SND_SOC_WCD939X
 qcom,wcn7850-bt BT_QCA
 qcom,wcn7850-pmu POWER_SEQUENCING_QCOM_WCN
 ramoops -
 regulator-fixed REGULATOR_FIXED_VOLTAGE
+sdw20217010e00 SND_SOC_WCD939X_SDW
 simple-bus -
 simple-framebuffer -
 simple-mfd -
