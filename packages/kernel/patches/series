@@ -23,3 +23,5 @@
 0029-ASoC-soc-core-reset-rtd-num_components-after-allocat.patch
 0030-ASoC-codecs-aw88261-Start-the-amplifier-from-a-work.patch
 0040-ASoC-qcom-sc8280xp-Set-up-the-Lenovo-Legion-Y700-202.patch
+0050-dt-bindings-usb-Add-GPIO-controlled-USB-2.0-port-mul.patch
+0051-usb-roles-Add-GPIO-controlled-USB-2.0-port-multiplex.patch
