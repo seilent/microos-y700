@@ -71,6 +71,21 @@ run stop || fail "second stop: exit $?: $(cat "$tmp/err")"
 [[ ! -e $g ]] || fail "second stop left the gadget"
 
 reset
+MICROOS_USB_FUNCS=acm.usb0 run start || fail "acm only: exit $?: $(cat "$tmp/err")"
+[[ $(ls "$g/configs/c.1" | tr '\n' ' ') == "acm.usb0 " && ! -e $g/functions/ncm.usb0 && $(< "$g/UDC") == a600000.usb ]] \
+  || fail "acm only: $(ls -R "$g" | tr '\n' ' ')"
+MICROOS_USB_FUNCS=acm.usb0 run stop || fail "acm only stop: exit $?: $(cat "$tmp/err")"
+[[ ! -e $g ]] || fail "acm only stop left $(find "$g" | tr '\n' ' ')"
+run start || fail "root start after the initrd: exit $?: $(cat "$tmp/err")"
+check_gadget TESTSERIAL0-microos "root start after the initrd"
+
+mod=$tree/usr/lib/dracut/modules.d/93microos-y700-usbcon
+unit=$mod/microos-initrd-usbcon.service
+[[ $(tail -n 1 "$mod/microos-initrd-usbcon") == "exec journalctl "* ]] || fail "initrd console: journalctl is not the main process"
+grep -qx 'ExecStart=-/usr/libexec/microos/microos-initrd-usbcon' "$unit" || fail "initrd console: ExecStart without the - prefix"
+grep -qx 'KillSignal=SIGKILL' "$unit" || fail "initrd console: no KillSignal=SIGKILL, a journalctl blocked on ttyGS0 holds SIGTERM until the stop times out"
+
+reset
 rm -rf "${class:?}/udc/a600000.usb"
 (
   for _ in $(seq 1 100); do
@@ -113,6 +128,8 @@ if POLLS=2 run start; then
 fi
 [[ $(< "$role") == device && ! -e $g ]] || fail "role without a UDC: role $(cat "$role")"
 
+sh -n "$tree/usr/lib/dracut/modules.d/93microos-y700-usbcon/microos-initrd-usbcon" || fail "microos-initrd-usbcon syntax"
+
 r=0
 run bogus || r=$?
 (( r == 2 )) || fail "usage exit $r"
@@ -124,9 +141,10 @@ if command -v systemd-analyze > /dev/null && [[ -d /usr/lib/systemd/system ]]; t
   [[ ! -d /usr/lib/dracut ]] || cp -a /usr/lib/dracut "$root/usr/lib/"
   cp -a "$tree/usr/lib/systemd/system/microos-usb-console.service" "$tree/usr/lib/systemd/system/serial-getty@ttyGS0.service.d" \
     "$root/usr/lib/systemd/system/"
-  cp -a "$script" "$root/usr/libexec/microos/"
+  cp -a "$script" "$tree/usr/lib/dracut/modules.d/93microos-y700-usbcon/microos-initrd-usbcon" "$root/usr/libexec/microos/"
+  cp -a "$tree/usr/lib/dracut/modules.d/93microos-y700-usbcon/microos-initrd-usbcon.service" "$root/usr/lib/systemd/system/"
   cp -a /usr/sbin/agetty "$root/usr/sbin/"
-  systemd-analyze verify --man=no --root="$root" microos-usb-console.service serial-getty@ttyGS0.service \
+  systemd-analyze verify --man=no --root="$root" microos-usb-console.service serial-getty@ttyGS0.service microos-initrd-usbcon.service \
     > "$tmp/verify" 2>&1 || fail "systemd-analyze verify: $(cat "$tmp/verify")"
   [[ ! -s $tmp/verify ]] || fail "systemd-analyze verify: $(cat "$tmp/verify")"
 else
