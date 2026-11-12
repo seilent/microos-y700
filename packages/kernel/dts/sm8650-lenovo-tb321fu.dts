@@ -20,6 +20,10 @@
 	compatible = "lenovo,tb321fu", "qcom,sm8650";
 	chassis-type = "tablet";
 
+	aliases {
+		serial1 = &uart14;
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 
