@@ -202,8 +202,8 @@
 
 		vreg_l12b_1p95: ldo12 {
 			regulator-name = "vreg_l12b_1p95";
-			regulator-min-microvolt = <1950000>;
-			regulator-max-microvolt = <1950000>;
+			regulator-min-microvolt = <1952000>;
+			regulator-max-microvolt = <1952000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-allow-set-load;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
