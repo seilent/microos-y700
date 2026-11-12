@@ -114,6 +114,7 @@ frags=("$src/tb321fu.config" "$src/microos.config")
 cfg=$tree
 cmk=("${mk[@]}")
 if [[ -n $dev ]]; then
+  frags+=("$src/dev.config")
   cfg=$top/config
   mkdir "$cfg"
   cmk+=(O="$cfg")
@@ -129,6 +130,10 @@ if [[ -n $lost ]]; then
   exit 1
 fi
 if [[ -n $dev ]]; then
+  if ! grep -qx 'CONFIG_DEBUG_INFO_NONE=y' "$cfg/.config" || grep -qx 'CONFIG_DEBUG_INFO_BTF=y' "$cfg/.config"; then
+    echo "dev .config still has debug info or BTF" >&2
+    exit 1
+  fi
   cmp -s "$cfg/.config" "$obj/.config" || cp "$cfg/.config" "$obj/.config"
   mk+=(O="$obj")
 fi
