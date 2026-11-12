@@ -50,6 +50,7 @@ fi
 cc=${CROSS_COMPILE:-}gcc
 if [[ -n ${CCACHE_DIR:-} ]] && command -v ccache >/dev/null; then
   ccache -M 5G >/dev/null
+  export CCACHE_SLOPPINESS=include_file_ctime,include_file_mtime,time_macros
   cc="ccache $cc"
 fi
 mk=(make -C "$tree" --no-print-directory -j"$(nproc)" CC="$cc" LOCALVERSION=)
