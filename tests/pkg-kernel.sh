@@ -40,9 +40,11 @@ done
 
 grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-kernel: CONFIG_LSM lacks yama: $(grep '^CONFIG_LSM=' "$kdir/config")" >&2; exit 1; }
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
+grep -qx '# CONFIG_RTC_DRV_EFI is not set' "$kdir/config" || { echo "pkg-kernel: CONFIG_RTC_DRV_EFI is set" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
-  snd-soc-wcd939x novatek-nt36523 aw86927 snd-soc-aw88261 snd-soc-sc8280xp; do
+  snd-soc-wcd939x novatek-nt36523 aw86927 snd-soc-aw88261 snd-soc-sc8280xp \
+  qcom_battmgr snd-soc-wcd939x-sdw soundwire-qcom snd-soc-lpass-rx-macro snd-soc-lpass-tx-macro; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 
@@ -147,7 +149,7 @@ for d in "$main" "$csot" "$abl"; do
     { echo "pkg-kernel: $n ps5169 graph" >&2; exit 1; }
   sbu=$i2c6/typec-mux@43
   [[ $(fdtget -d okay "$d" "$sbu" status) == okay && $(fdtget "$d" "$sbu" compatible) == fcs,fsa4480 &&
-    $(fdtget -t x "$d" "$glink/port@2/endpoint" remote-endpoint) == "$(ep "$sbu/port/endpoint")" ]] ||
+    $(fdtget -t x "$d" "$glink/port@2/endpoint@0" remote-endpoint) == "$(ep "$sbu/port/endpoint")" ]] ||
     { echo "pkg-kernel: $n fsa4480 sbu graph" >&2; exit 1; }
   [[ $(fdtget -t x "$d" "$glink/port@0/endpoint" remote-endpoint) == "$(ep /soc@0/usb@a600000/ports/port@0/endpoint)" ]] ||
     { echo "pkg-kernel: $n gadget hs graph" >&2; exit 1; }
@@ -176,6 +178,29 @@ for d in "$main" "$csot" "$abl"; do
   [[ $v == "40 8 32 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0" ]] || { echo "pkg-kernel: $n speaker link $v" >&2; exit 1; }
   v="$(fdtget "$d" "$dai" reg) $(fdtget "$d" "$dai" clock-names) $(fdtget "$d" "$dai" clocks | cut -d' ' -f2-)"
   [[ $v == "40 bclk 37 1" ]] || { echo "pkg-kernel: $n sec tdm dai $v" >&2; exit 1; }
+done
+
+codec=/audio-codec
+rx=/soc@0/soundwire@6ad0000/codec@0,4
+tx=/soc@0/soundwire@6d30000/codec@0,3
+for d in "$main" "$csot" "$abl"; do
+  n=$(basename "$d")
+  v="$(fdtget "$d" "$codec" compatible) $(fdtget "$d" "$codec" reset-gpios | cut -d' ' -f2-)"
+  for b in 1 2 3 4; do v+=" $(fdtget "$d" "$codec" "qcom,micbias$b-microvolt")"; done
+  [[ $v == "qcom,wcd9390-codec 107 1 1800000 2700000 1800000 1800000" ]] || { echo "pkg-kernel: $n wcd939x $v" >&2; exit 1; }
+  fdtget "$d" "$codec" mode-switch > /dev/null || { echo "pkg-kernel: $n wcd939x is not a mode switch" >&2; exit 1; }
+  [[ $(fdtget -t x "$d" "$glink/port@2/endpoint@1" remote-endpoint) == "$(ep "$codec/port/endpoint")" &&
+    $(fdtget -t x "$d" "$codec/port/endpoint" remote-endpoint) == "$(ep "$glink/port@2/endpoint@1")" ]] ||
+    { echo "pkg-kernel: $n wcd939x headset graph" >&2; exit 1; }
+  for s in "$rx rx 1 2 3 4 5 9" "$tx tx 2 2 3 4"; do
+    read -r node dir map <<<"$s"
+    [[ $(fdtget -d okay "$d" "${node%/*}" status) == okay && $(fdtget "$d" "$node" compatible) == sdw20217010e00 &&
+      $(fdtget "$d" "$node" "qcom,$dir-port-mapping") == "$map" &&
+      $(fdtget -t x "$d" "$codec" "qcom,$dir-device") == "$(ep "$node")" ]] || { echo "pkg-kernel: $n wcd939x $dir device" >&2; exit 1; }
+  done
+  v="$(fdtget "$d" /sound/wcd-playback-dai-link/cpu sound-dai | cut -d' ' -f2)"
+  v+=" $(fdtget "$d" /sound/wcd-capture-dai-link/cpu sound-dai | cut -d' ' -f2)"
+  [[ $v == "113 120" ]] || { echo "pkg-kernel: $n wcd links $v" >&2; exit 1; }
 done
 
 dtbo=$kdir/dtb/qcom/sm8650-lenovo-tb321fu-dtbo.img

@@ -191,6 +191,18 @@ if os.path.exists(ucm):
         for dev in re.findall(kind + r' "hw:\$\{CardId\},(\d+)"', text):
             if (int(dev), d) not in set(ours['pcm'].values()):
                 fail(f"UCM {kind} device {dev} is not a {d} PCM")
+    for n in re.findall(r"CaptureChannels\s+(\d+)", text):
+        if int(n) < 2:
+            fail(f"UCM CaptureChannels {n}: q6apm-dai capture front ends take 2 to 4 channels")
+    verb = re.search(r"SectionVerb\s*\{.*?EnableSequence\s*\[(.*?)\]", text, re.S)
+    routed = set(re.findall(r"cset \"name='([^']+)' 1\"", verb.group(1))) if verb else set()
+    fe = {v: n.split()[0] for n, v in ours['pcm'].items()}
+    for kind, d in (('PlaybackPCM', 'playback'), ('CapturePCM', 'capture')):
+        for dev in set(re.findall(kind + r' "hw:\$\{CardId\},(\d+)"', text)):
+            f = fe.get((int(dev), d))
+            if f and not any(n.endswith(' Audio Mixer ' + f) if d == 'playback' else n.startswith(f + ' Mixer ')
+                             for n in routed):
+                fail(f"UCM verb routes no back end for {f}, the PipeWire probe of hw:{dev} fails")
     print(f"ucm: {len(used)} topology controls checked", file=sys.stderr)
 
 refc = os.path.join(w, 'ref.conf')
