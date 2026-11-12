@@ -17,3 +17,4 @@ Config: `tb321fu.config` holds the board lines, `microos.config` the image level
 | `0004-drm-panel-novatek-nt36523-Add-Lenovo-Legion-Y700-202.patch` | mine | `card1-DSI-1` connected, 1600x2560 at 120 Hz, picture without DSC or underrun errors, panel back after 10 DPMS cycles |
 | `0005-dt-bindings-backlight-kinetic-ktz8866-Add-boost-and-.patch` | mine | `dt-validate` on the TB321FU DTBs |
 | `0006-backlight-ktz8866-Set-boost-OVP-inductor-and-LED-cur.patch` | mine | KTZ8866 regs 0x02 0xda, 0x11 0x37, 0x15 0x68; brightness steps even |
+| `0013-iommu-arm-smmu-qcom-Add-SM8650-MDSS-compatible-to-cl.patch` | mine | no `Unhandled context fault` on SID 0x1c00 at the splash addresses during boot; MDSS group default domain identity |
