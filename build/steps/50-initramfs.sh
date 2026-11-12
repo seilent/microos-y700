@@ -8,11 +8,11 @@ img=/usr/lib/modules/$kver/initramfs.img
 
 mkdir -p /var/roothome
 dracut --no-hostonly --reproducible \
-  -m "systemd systemd-initrd dracut-systemd base fs-lib rootfs-block udev-rules shutdown ostree microos-ostree-remap microos-y700-guard" \
+  -m "systemd systemd-initrd dracut-systemd base fs-lib rootfs-block udev-rules shutdown ostree microos-ostree-remap microos-y700-guard microos-y700-usbcon" \
   -o "kernel-modules bootc virtiofs lvm crypt fips tpm2-tss clevis clevis-pin-tpm2 nss-softokn" \
   --drivers "btrfs nvmem-qcom-spmi-sdam" --compress "zstd -19" --force "$img" "$kver"
 
-want="base dracut-systemd fs-lib microos-ostree-remap microos-y700-guard ostree rootfs-block shutdown systemd \
+want="base dracut-systemd fs-lib microos-ostree-remap microos-y700-guard microos-y700-usbcon ostree rootfs-block shutdown systemd \
 systemd-ask-password systemd-initrd systemd-journald systemd-modules-load systemd-sysctl systemd-sysusers systemd-tmpfiles \
 systemd-udevd udev-rules"
 got=$(lsinitrd -m "$img" | sed '1,/^dracut modules:$/d;/^=/,$d' | LC_ALL=C sort | xargs)
@@ -33,6 +33,11 @@ for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-lo
   grep -qE " $f( |$)" <<< "$list" || { echo "50-initramfs: $f missing" >&2; exit 1; }
 done
 grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || { echo "50-initramfs: microos-guard.service not enabled" >&2; exit 1; }
+for f in usr/libexec/microos/microos-usb-console usr/libexec/microos/microos-initrd-usbcon usr/lib/systemd/system/microos-initrd-usbcon.service \
+  usr/bin/bash usr/bin/stty; do
+  grep -qE " $f( |$)" <<< "$list" || { echo "50-initramfs: $f missing" >&2; exit 1; }
+done
+grep -qE "/sysinit\.target\.wants/microos-initrd-usbcon\.service( |$)" <<< "$list" || { echo "50-initramfs: microos-initrd-usbcon.service not enabled" >&2; exit 1; }
 [[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] \
   || { echo "50-initramfs: cmdline.d/90-microos.conf" >&2; exit 1; }
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \

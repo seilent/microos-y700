@@ -32,6 +32,7 @@ builtin=(
   SECURITY_YAMA HOTPLUG_PCI_PCIE UCLAMP_TASK UCLAMP_TASK_GROUP CGROUP_BPF BPF_SYSCALL
   NETFILTER_NETLINK IP_ADVANCED_ROUTER IP_MULTIPLE_TABLES IPV6_MULTIPLE_TABLES FIB_RULES
   EFI EFI_STUB PANIC_ON_OOPS DEVMEM NVMEM_SYSFS
+  USB_CONFIGFS USB_LIBCOMPOSITE USB_F_ACM USB_F_NCM USB_CONFIGFS_ACM PHY_SNPS_EUSB2 PHY_NXP_PTN3222
 )
 for s in "${builtin[@]}"; do
   grep -qx "CONFIG_$s=y" "$kdir/config" || { echo "pkg-kernel: CONFIG_$s is not built in" >&2; exit 1; }
@@ -41,7 +42,7 @@ grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-k
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
-  libcomposite usb_f_acm usb_f_ncm phy-nxp-ptn3222 snd-soc-wcd939x; do
+  snd-soc-wcd939x; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 

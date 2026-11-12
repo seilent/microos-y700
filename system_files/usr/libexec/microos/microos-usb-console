@@ -9,7 +9,7 @@ modprobe=${MICROOS_MODPROBE:-modprobe}
 polls=${MICROOS_USB_POLLS:-120}
 gadget=$cfg/usb_gadget/microos
 config=$gadget/configs/c.1
-funcs=(acm.usb0 ncm.usb0)
+read -r -a funcs <<< "${MICROOS_USB_FUNCS:-acm.usb0 ncm.usb0}"
 ncm=$gadget/functions/ncm.usb0
 dev_mac=02:6e:3a:91:c4:05
 host_mac=02:6e:3a:91:c4:06
@@ -74,7 +74,7 @@ start() {
   for f in "${funcs[@]}"; do
     mkdir -p "$gadget/functions/$f" || return 1
   done
-  if [[ ! -L $config/ncm.usb0 ]]; then
+  if [[ " ${funcs[*]} " == *" ncm.usb0 "* && ! -L $config/ncm.usb0 ]]; then
     put "$ncm/dev_addr" "$dev_mac" && put "$ncm/host_addr" "$host_mac" || return 1
   fi
   for f in "${funcs[@]}"; do

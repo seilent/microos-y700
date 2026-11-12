@@ -108,6 +108,9 @@ kept=(
   /usr/lib/dracut/modules.d/92microos-y700-guard/microos-initrd-log
   /usr/lib/dracut/modules.d/92microos-y700-guard/module-setup.sh
   /usr/lib/dracut/modules.d/92microos-y700-guard/switch-root.conf
+  /usr/lib/dracut/modules.d/93microos-y700-usbcon/microos-initrd-usbcon
+  /usr/lib/dracut/modules.d/93microos-y700-usbcon/microos-initrd-usbcon.service
+  /usr/lib/dracut/modules.d/93microos-y700-usbcon/module-setup.sh
   /usr/lib/microos/boot-ok.conf
   /usr/lib/microos/bootimg.conf
   /usr/lib/microos/slot.conf
@@ -456,6 +459,10 @@ for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-lo
   grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
 done
 grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || fail "initramfs does not enable microos-guard.service"
+for f in usr/libexec/microos/microos-usb-console usr/libexec/microos/microos-initrd-usbcon usr/lib/systemd/system/microos-initrd-usbcon.service; do
+  grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
+done
+grep -qE "/sysinit\.target\.wants/microos-initrd-usbcon\.service( |$)" <<< "$list" || fail "initramfs does not enable microos-initrd-usbcon.service"
 unpack=$(mktemp -d)
 (cd "$unpack" && lsinitrd --unpack "$img" usr/lib/systemd/system/emergency.service.d/10-microos.conf \
   usr/lib/systemd/system/dracut-emergency.service.d/10-microos.conf)
