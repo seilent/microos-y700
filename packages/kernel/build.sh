@@ -91,6 +91,7 @@ install -Dm644 "$src/LICENSE.kernel" "$stage/usr/share/licenses/microos-kernel/L
 
 rpmbuild -bb --target aarch64 \
   --define "_topdir $top/rpm" \
+  --define "_binary_payload w19T0.zstdio" \
   --define "kversion ${kversion//-/\~}" \
   --define "kver $kver" \
   --define "kuname ${kver/-rc/\~rc}" \
