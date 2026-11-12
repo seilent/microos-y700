@@ -22,6 +22,7 @@ grep -qx "$(cat /usr/lib/microos/version)" /usr/lib/os-release || fail "version 
 [[ $(readlink /etc/os-release) == ../usr/lib/os-release ]] || fail "/etc/os-release is not the relative symlink"
 
 rpm -q android-tools btrfs-progs dosfstools jq util-linux rsync dnsmasq python3 >/dev/null || fail "base rpms missing"
+rpm -q bluez e2fsprogs >/dev/null || fail "bluez or e2fsprogs missing"
 rpm -q chrony NetworkManager-wifi wpa_supplicant wireless-regdb atheros-firmware qcom-firmware linux-firmware mesa-dri-drivers \
   mesa-vulkan-drivers mesa-libgbm mesa-libEGL mesa-libGL vulkan-loader vulkan-tools sddm sddm-wayland-generic steam-devices \
   dbus-tools gtk2 gtk3 openal-soft sdl2-compat libXcomposite libXdamage libXfixes libXi libXinerama libXrandr libXrender \
@@ -55,7 +56,7 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
-  microos-remoteproc.service "${tests[@]}")
+  microos-remoteproc.service microos-bdaddr@.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -68,6 +69,7 @@ for u in microos-boot-ok.service microos-provision.service microos-update-applie
 done
 [[ -L /etc/systemd/system/multi-user.target.wants/microos-bootlog-efi.path ]] || fail "microos-bootlog-efi.path is not wanted by multi-user.target"
 [[ $(systemctl is-enabled microos-bootlog-efi.service) == static ]] || fail "microos-bootlog-efi.service is not static"
+[[ $(systemctl is-enabled microos-bdaddr@.service) == static ]] || fail "microos-bdaddr@.service is not static"
 for u in "${tests[@]}"; do
   w=${u#microos-test-}
   systemctl cat "$u" | grep -qx "ConditionKernelCommandLine=microos.test=${w%.service}" || fail "$u has no microos.test condition"
@@ -124,6 +126,7 @@ kept=(
   /usr/lib/systemd/system-preset/50-microos.preset
   /usr/lib/systemd/system-preset/60-microos-steam.preset
   /usr/lib/systemd/system/emergency.service.d/10-microos.conf
+  /usr/lib/systemd/system/microos-bdaddr@.service
   /usr/lib/systemd/system/microos-boot-deadline.service
   /usr/lib/systemd/system/microos-boot-deadline.timer
   /usr/lib/systemd/system/microos-boot-ok.service
@@ -150,6 +153,8 @@ kept=(
   /usr/lib/sysusers.d/microos.conf
   /usr/lib/tmpfiles.d/microos.conf
   /usr/lib/udev/rules.d/90-microos-usb-console.rules
+  /usr/lib/udev/rules.d/91-microos-y700-bdaddr.rules
+  /usr/libexec/microos/microos-bdaddr
   /usr/libexec/microos/microos-boot-ok
   /usr/libexec/microos/microos-bootimg-build
   /usr/libexec/microos/microos-bootlog
@@ -353,6 +358,11 @@ grep -qxF 'ATTRS{name}=="NVTCapacitiveTouchScreen", ENV{LIBINPUT_CALIBRATION_MAT
 grep -qF 'ATTRS{name}=="NVTCapacitivePen", ENV{.HAVE_HWDB_PROPERTIES}="1", ENV{EVDEV_ABS_00}="::135", ENV{EVDEV_ABS_01}="::135"' "$rules" || fail "pen resolution rule"
 udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
 udevadm verify --no-style /usr/lib/udev/rules.d/60-microos-backlight.rules >/dev/null 2>&1 || fail "60-microos-backlight.rules does not verify"
+rules=/usr/lib/udev/rules.d/91-microos-y700-bdaddr.rules
+[[ $(< "$rules") == 'SUBSYSTEM=="bluetooth", KERNEL=="hci[0-9]*", ENV{DEVTYPE}=="host", TAG+="systemd", ENV{SYSTEMD_WANTS}+="microos-bdaddr@%k.service"' ]] \
+  || fail "91-microos-y700-bdaddr.rules"
+udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
+[[ -x /usr/bin/btmgmt && -x /usr/bin/debugfs ]] || fail "btmgmt or debugfs missing"
 pw=/usr/bin/steamos-polkit-helpers/steamos-priv-write
 [[ $(stat -c %a "$pw") == 755 ]] || fail "$pw is not 755"
 ! "$pw" /etc/passwd 1 2>/dev/null || fail "$pw writes outside backlight brightness"
