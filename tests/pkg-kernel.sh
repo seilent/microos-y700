@@ -151,9 +151,20 @@ for d in "$main" "$csot" "$abl"; do
   [[ $(fdtget -d okay "$d" "$sbu" status) == okay && $(fdtget "$d" "$sbu" compatible) == fcs,fsa4480 &&
     $(fdtget -t x "$d" "$glink/port@2/endpoint@0" remote-endpoint) == "$(ep "$sbu/port/endpoint")" ]] ||
     { echo "pkg-kernel: $n fsa4480 sbu graph" >&2; exit 1; }
-  [[ $(fdtget -t x "$d" "$glink/port@0/endpoint" remote-endpoint) == "$(ep /soc@0/usb@a600000/ports/port@0/endpoint)" ]] ||
-    { echo "pkg-kernel: $n gadget hs graph" >&2; exit 1; }
-  [[ $(fdtget "$d" /soc@0/usb@a600000 dr_mode) == peripheral ]] || { echo "pkg-kernel: $n usb_1 dr_mode" >&2; exit 1; }
+  hs=/usb2-port-mux
+  [[ $(fdtget "$d" $hs compatible) == gpio-usb2-port-mux && $(fdtget "$d" $hs select-gpios | cut -d' ' -f2-) == "58 0" ]] ||
+    { echo "pkg-kernel: $n usb2 port mux" >&2; exit 1; }
+  [[ $(fdtget -t x "$d" "$glink/port@0/endpoint" remote-endpoint) == "$(ep $hs/usb2-port@0/port/endpoint)" &&
+    $(fdtget -t x "$d" $hs/usb2-port@0/port/endpoint remote-endpoint) == "$(ep "$glink/port@0/endpoint")" &&
+    $(fdtget -t x "$d" /pmic-glink/connector@1/ports/port@0/endpoint remote-endpoint) == "$(ep $hs/usb2-port@1/port/endpoint)" &&
+    $(fdtget -t x "$d" $hs/usb2-port@1/port/endpoint remote-endpoint) == "$(ep /pmic-glink/connector@1/ports/port@0/endpoint)" &&
+    $(fdtget -t x "$d" $hs/port/endpoint remote-endpoint) == "$(ep /soc@0/usb@a600000/ports/port@0/endpoint)" &&
+    $(fdtget -t x "$d" /soc@0/usb@a600000/ports/port@0/endpoint remote-endpoint) == "$(ep $hs/port/endpoint)" ]] ||
+    { echo "pkg-kernel: $n usb2 hs graph" >&2; exit 1; }
+  fdtget "$d" $hs/usb2-port@0 usb-role-switch > /dev/null && fdtget "$d" $hs/usb2-port@1 usb-role-switch > /dev/null ||
+    { echo "pkg-kernel: $n usb2 port mux role switches" >&2; exit 1; }
+  [[ $(fdtget "$d" /soc@0/usb@a600000 dr_mode) == otg ]] && fdtget "$d" /soc@0/usb@a600000 usb-role-switch > /dev/null ||
+    { echo "pkg-kernel: $n usb_1 otg role switch" >&2; exit 1; }
   [[ $(fdtget -d okay "$d" "$disp/displayport-controller@af54000" status) == disabled ]] || { echo "pkg-kernel: $n dp0 is on" >&2; exit 1; }
 done
 

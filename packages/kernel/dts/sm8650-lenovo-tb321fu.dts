@@ -98,7 +98,7 @@
 					reg = <0>;
 
 					pmic_glink_hs_in: endpoint {
-						remote-endpoint = <&usb_1_dwc3_hs>;
+						remote-endpoint = <&usb2_port_mux_in0>;
 					};
 				};
 
@@ -134,6 +134,19 @@
 
 			power-role = "dual";
 			data-role = "dual";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					pmic_glink_hs_in1: endpoint {
+						remote-endpoint = <&usb2_port_mux_in1>;
+					};
+				};
+			};
 		};
 	};
 
@@ -225,6 +238,41 @@
 
 			platform {
 				sound-dai = <&q6apm>;
+			};
+		};
+	};
+
+	usb2-port-mux {
+		compatible = "gpio-usb2-port-mux";
+		select-gpios = <&tlmm 58 GPIO_ACTIVE_HIGH>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port {
+			usb2_port_mux_out: endpoint {
+				remote-endpoint = <&usb_1_dwc3_hs>;
+			};
+		};
+
+		usb2-port@0 {
+			reg = <0>;
+			usb-role-switch;
+
+			port {
+				usb2_port_mux_in0: endpoint {
+					remote-endpoint = <&pmic_glink_hs_in>;
+				};
+			};
+		};
+
+		usb2-port@1 {
+			reg = <1>;
+			usb-role-switch;
+
+			port {
+				usb2_port_mux_in1: endpoint {
+					remote-endpoint = <&pmic_glink_hs_in1>;
+				};
 			};
 		};
 	};
@@ -1117,13 +1165,14 @@
 };
 
 &usb_1 {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
+	usb-role-switch;
 
 	status = "okay";
 };
 
 &usb_1_dwc3_hs {
-	remote-endpoint = <&pmic_glink_hs_in>;
+	remote-endpoint = <&usb2_port_mux_out>;
 };
 
 &usb_1_hsphy {
