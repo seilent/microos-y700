@@ -87,5 +87,7 @@ dnf -y install \
   google-noto-sans-mono-vf-fonts \
   upower \
   procps-ng \
+  bluez \
+  e2fsprogs \
   zstd \
   "${rpms[@]}"
