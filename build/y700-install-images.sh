@@ -218,7 +218,6 @@ entries=("$T"/boot/loader/entries/*.conf)
 bls() { sed -n "s/^$1[[:space:]]\+//p" "${entries[0]}"; }
 options=$(bls options)
 [[ -z $kround ]] || options+=" microos.kround=$kround"
-[[ $kround != p1[abc] && $kround != p1[abc]-* && $kround != p2[abc] && $kround != p2[abc]-* ]] || options+=" msm.separate_gpu_kms=1"
 
 log "seed /var"
 if ostree ls --repo="$R" "$commit" /var > /dev/null 2>&1; then
