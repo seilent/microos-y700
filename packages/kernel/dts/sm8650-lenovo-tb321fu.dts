@@ -153,7 +153,6 @@
 		compatible = "qcom,pm8550-rpmh-regulators";
 
 		vdd-bob1-supply = <&vph_pwr>;
-		vdd-bob2-supply = <&vph_pwr>;
 		vdd-l2-l13-l14-supply = <&vreg_bob1>;
 		vdd-l3-supply = <&vreg_s1c_1p2>;
 		vdd-l5-l16-supply = <&vreg_bob1>;
@@ -162,7 +161,6 @@
 		vdd-l11-supply = <&vreg_s1c_1p2>;
 		vdd-l12-supply = <&vreg_s6c_1p8>;
 		vdd-l15-supply = <&vreg_s6c_1p8>;
-		vdd-l17-supply = <&vreg_bob2>;
 
 		qcom,pmic-id = "b";
 
@@ -170,13 +168,6 @@
 			regulator-name = "vreg_bob1";
 			regulator-min-microvolt = <3296000>;
 			regulator-max-microvolt = <3960000>;
-			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-		};
-
-		vreg_bob2: bob2 {
-			regulator-name = "vreg_bob2";
-			regulator-min-microvolt = <2720000>;
-			regulator-max-microvolt = <3008000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -202,8 +193,8 @@
 
 		vreg_l12b_1p95: ldo12 {
 			regulator-name = "vreg_l12b_1p95";
-			regulator-min-microvolt = <1952000>;
-			regulator-max-microvolt = <1952000>;
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-allow-set-load;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
