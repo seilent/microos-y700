@@ -112,8 +112,8 @@ if [[ -n ${KROUND:-} ]]; then
       [[ $cw == *" $k "* ]] || fail "$name: no $k in the cmdline"
     done
     case $KROUND in
-      p1a|p1a-*|p1b|p1b-*|p1c|p1c-*|p2a|p2a-*|p2b|p2b-*) [[ $cw == *" msm.separate_gpu_kms=1 "* ]] || fail "$name: no msm.separate_gpu_kms=1" ;;
-      *) [[ $cw != *" msm.separate_gpu_kms="* ]] || fail "$name: msm.separate_gpu_kms= outside p1a to p2b" ;;
+      p1a|p1a-*|p1b|p1b-*|p1c|p1c-*|p2a|p2a-*|p2b|p2b-*|p2c|p2c-*) [[ $cw == *" msm.separate_gpu_kms=1 "* ]] || fail "$name: no msm.separate_gpu_kms=1" ;;
+      *) [[ $cw != *" msm.separate_gpu_kms="* ]] || fail "$name: msm.separate_gpu_kms= outside p1a to p2c" ;;
     esac
     [[ $cw =~ \ ostree=/ostree/boot\.[01]/default/[0-9a-f]{64}/[0-9]+\  ]] || fail "$name: ostree= is not a boot link"
     [[ $cw == *" microos.test="* ]] || fail "$name: no microos.test"

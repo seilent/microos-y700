@@ -491,6 +491,13 @@ indev input4 2 "1000003" "c03 0 0 0 0 0"
 run || fail "kround p2b pass: $(cat "$tmp/out")"
 kept "kround p2b pass"
 has "kround p2b: checks udc wlan0 dsi touch pen" || fail "kround p2b checks not reported: $(cat "$tmp/out")"
+kround p2c
+echo connected > "$tmp/sys/drm/card1-DSI-1/status"
+indev input3 2 "660800000000003" "400 0 0 0 0 0"
+indev input4 2 "1000003" "c03 0 0 0 0 0"
+run || fail "kround p2c pass: $(cat "$tmp/out")"
+kept "kround p2c pass"
+has "kround p2c: checks udc wlan0 dsi touch pen" || fail "kround p2c checks not reported: $(cat "$tmp/out")"
 for k in p1a-hang p9 p1d; do
   kround "$k"
   echo "$B" > "$MICROOS_STATEDIR/boot-ok-skip"
