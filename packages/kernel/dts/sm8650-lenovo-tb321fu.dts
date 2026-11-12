@@ -24,6 +24,41 @@
 		serial1 = &uart14;
 	};
 
+	wcd939x: audio-codec {
+		compatible = "qcom,wcd9390-codec";
+
+		pinctrl-0 = <&wcd_default>;
+		pinctrl-names = "default";
+
+		qcom,micbias1-microvolt = <1800000>;
+		qcom,micbias2-microvolt = <2700000>;
+		qcom,micbias3-microvolt = <1800000>;
+		qcom,micbias4-microvolt = <1800000>;
+		qcom,mbhc-buttons-vthreshold-microvolt = <75000 150000 237000 500000 500000 500000 500000 500000>;
+		qcom,mbhc-headset-vthreshold-microvolt = <2550000>;
+		qcom,mbhc-headphone-vthreshold-microvolt = <75000>;
+		qcom,rx-device = <&wcd_rx>;
+		qcom,tx-device = <&wcd_tx>;
+
+		reset-gpios = <&tlmm 107 GPIO_ACTIVE_LOW>;
+
+		vdd-buck-supply = <&vreg_l15b_1p8>;
+		vdd-rxtx-supply = <&vreg_l15b_1p8>;
+		vdd-io-supply = <&vreg_l15b_1p8>;
+		vdd-mic-bias-supply = <&vreg_bob1>;
+		vdd-px-supply = <&vreg_l15b_1p8>;
+
+		#sound-dai-cells = <1>;
+
+		mode-switch;
+
+		port {
+			wcd_codec_headset_in: endpoint {
+				remote-endpoint = <&pmic_glink_headset>;
+			};
+		};
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -77,9 +112,17 @@
 
 				port@2 {
 					reg = <2>;
+					#address-cells = <1>;
+					#size-cells = <0>;
 
-					pmic_glink_sbu: endpoint {
+					pmic_glink_sbu: endpoint@0 {
+						reg = <0>;
 						remote-endpoint = <&fsa4480_sbu_mux>;
+					};
+
+					pmic_glink_headset: endpoint@1 {
+						reg = <1>;
+						remote-endpoint = <&wcd_codec_headset_in>;
 					};
 				};
 			};
@@ -126,6 +169,11 @@
 		pinctrl-0 = <&sec_tdm_default>;
 		pinctrl-names = "default";
 
+		audio-routing = "IN1_HPHL", "HPHL_OUT",
+				"IN2_HPHR", "HPHR_OUT",
+				"AMIC2", "MIC BIAS2",
+				"TX SWR_INPUT1", "ADC2_OUTPUT";
+
 		speaker-tdm-dai-link {
 			link-name = "Speaker Playback";
 
@@ -141,6 +189,38 @@
 				sound-dai = <&speaker_left>, <&speaker_right>;
 
 				dai-tdm-slot-rx-mask = <1 1 0 0 0 0 0 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		wcd-playback-dai-link {
+			link-name = "WCD Playback";
+
+			cpu {
+				sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
+			};
+
+			codec {
+				sound-dai = <&wcd939x 0>, <&swr1 0>, <&lpass_rxmacro 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		wcd-capture-dai-link {
+			link-name = "WCD Capture";
+
+			cpu {
+				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
+			};
+
+			codec {
+				sound-dai = <&wcd939x 1>, <&swr2 0>, <&lpass_txmacro 0>;
 			};
 
 			platform {
@@ -865,6 +945,28 @@
 	};
 };
 
+&swr1 {
+	status = "okay";
+
+	wcd_rx: codec@0,4 {
+		compatible = "sdw20217010e00";
+		reg = <0 4>;
+
+		qcom,rx-port-mapping = <1 2 3 4 5 9>;
+	};
+};
+
+&swr2 {
+	status = "okay";
+
+	wcd_tx: codec@0,3 {
+		compatible = "sdw20217010e00";
+		reg = <0 3>;
+
+		qcom,tx-port-mapping = <2 2 3 4>;
+	};
+};
+
 &tlmm {
 	gpio-reserved-ranges = <40 4>, <74 1>;
 
@@ -958,6 +1060,14 @@
 		pins = "gpio127";
 		function = "gpio";
 		bias-pull-up;
+	};
+
+	wcd_default: wcd-reset-n-active-state {
+		pins = "gpio107";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+		output-low;
 	};
 
 	wlan_en: wlan-en-state {
