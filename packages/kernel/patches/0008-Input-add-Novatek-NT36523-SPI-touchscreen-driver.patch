@@ -5,16 +5,17 @@ Subject: [PATCH] Input: add Novatek NT36523 SPI touchscreen driver
 
 Add a driver for the touchscreen and pen part of the Novatek NT36523
 display driver IC over SPI. The controller runs from RAM: each time the
-panel is prepared the driver identifies the chip, loads the firmware
+panel is enabled the driver identifies the chip, loads the firmware
 named by firmware-name, waits for the firmware to start and enables the
-interrupt. It follows the panel through the DRM panel follower API, so
-the firmware is loaded again after every panel power cycle and after a
-controller watchdog reset. A reset reported as 0xfe first puts the MCU
-in idle and clears its ACI error flag. More than five watchdog resets in
-a row, each within ten seconds of the last, stop the reloads until the
-next panel power cycle. A start that fails while the panel is on, for
-example because the firmware file is not readable yet, is retried a few
-times.
+interrupt. It follows the panel through the DRM panel follower API and
+starts the firmware after the panel is enabled, with the display already
+scanning out. The firmware is loaded again after every panel enable and
+after a controller watchdog reset. A reset reported as 0xfe first puts
+the MCU in idle and clears its ACI error flag. More than five watchdog
+resets in a row, each within ten seconds of the last, stop the reloads
+until the panel is enabled again. A start that fails while the panel is
+on, for example because the firmware file is not readable yet, is
+retried a few times.
 
 After each start the driver sends the pen mode command; the pen module
 parameter turns that off.
@@ -82,7 +83,7 @@ index bfd9de833..22e65217e 100644
  obj-$(CONFIG_TOUCHSCREEN_HP7XX)		+= jornada720_ts.o
 diff --git a/drivers/input/touchscreen/novatek-nt36523.c b/drivers/input/touchscreen/novatek-nt36523.c
 new file mode 100644
-index 000000000..a09e1c5a8
+index 000000000..e13cd02bd
 --- /dev/null
 +++ b/drivers/input/touchscreen/novatek-nt36523.c
 @@ -0,0 +1,1038 @@
@@ -914,7 +915,7 @@ index 000000000..a09e1c5a8
 +	return IRQ_HANDLED;
 +}
 +
-+static int nt36523_panel_prepared(struct drm_panel_follower *follower)
++static int nt36523_panel_enabled(struct drm_panel_follower *follower)
 +{
 +	struct nt36523_ts *ts = container_of(follower, struct nt36523_ts, follower);
 +
@@ -925,7 +926,7 @@ index 000000000..a09e1c5a8
 +	return 0;
 +}
 +
-+static int nt36523_panel_unpreparing(struct drm_panel_follower *follower)
++static int nt36523_panel_disabling(struct drm_panel_follower *follower)
 +{
 +	struct nt36523_ts *ts = container_of(follower, struct nt36523_ts, follower);
 +
@@ -937,8 +938,8 @@ index 000000000..a09e1c5a8
 +}
 +
 +static const struct drm_panel_follower_funcs nt36523_follower_funcs = {
-+	.panel_prepared = nt36523_panel_prepared,
-+	.panel_unpreparing = nt36523_panel_unpreparing,
++	.panel_enabled = nt36523_panel_enabled,
++	.panel_disabling = nt36523_panel_disabling,
 +};
 +
 +static void nt36523_set_res(struct nt36523_ts *ts, struct input_dev *input,
