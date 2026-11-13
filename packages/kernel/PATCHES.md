@@ -21,7 +21,7 @@ Config: `tb321fu.config` holds the board lines, `microos.config` the image level
 | `0007-dt-bindings-input-touchscreen-Add-Novatek-NT36523-SP.patch` | mine | `dt-validate` on the TB321FU DTBs |
 | `0008-Input-add-Novatek-NT36523-SPI-touchscreen-driver.patch` | mine | the firmware version logged after the panel enable, no 0xfe resets with the full picture; 10 fingers matching the landscape panel; the pen input device and its absinfo; firmware reload after a DPMS cycle; reloads stop after five watchdog resets in a row |
 | `0009-dt-bindings-input-awinic-aw86927-Add-AW86937.patch` | mine | `dt-validate` on the TB321FU DTBs |
-| `0010-Input-aw86927-add-support-for-AW86937.patch` | mine | both motors probe with chip ID 0x9370; `fftest` rumble and stop on both, felt |
+| `0010-Input-aw86927-add-support-for-AW86937.patch` | mine | both motors probe with chip ID 0x9370; `fftest` rumble and stop on both, felt, 170 Hz from the 141 sample SRAM waveform |
 | `0011-dt-bindings-usb-Add-Parade-PS5169-USB-C-redriver.patch` | mine | `dt-validate` on the TB321FU DTBs |
 | `0012-usb-typec-mux-Add-Parade-PS5169-redriver-driver.patch` | mine | typec switch and retimer registered; DP alt mode picture on a monitor; SuperSpeed link on the USB-C port |
 | `0020-ASoC-dt-bindings-awinic-aw88395-Add-AW88461.patch` | mine | `dt-validate` on the TB321FU DTBs |
