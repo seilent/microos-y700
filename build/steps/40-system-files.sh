@@ -4,11 +4,7 @@ set -euo pipefail
 cp -a /ctx/system_files/. /
 chmod 600 /usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 
-while read -r t u g; do
-  if [[ $t == m && $u == micro ]] && ! grep -q "^$g:" /etc/group; then
-    grep "^$g:" /usr/lib/group >> /etc/group
-  fi
-done < /usr/lib/sysusers.d/microos.conf
+/usr/libexec/microos/microos-groups
 systemd-sysusers /usr/lib/sysusers.d/microos.conf
 mkdir -p /etc/systemd/system-generators
 ln -sfn /dev/null /etc/systemd/system-generators/systemd-gpt-auto-generator
