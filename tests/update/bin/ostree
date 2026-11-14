@@ -10,7 +10,7 @@ case "$1 ${2:-}" in
       cat "$FAKE_DIR/ostree.json"
     fi
     ;;
-  "admin undeploy")
+  "admin undeploy"|"admin lock-finalization")
     ;;
   *)
     exit 1
