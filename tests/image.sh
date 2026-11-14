@@ -55,7 +55,7 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
-  microos-remoteproc.service "${tests[@]}")
+  microos-remoteproc.service microos-groups.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -63,9 +63,13 @@ done
 got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
-  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service "${tests[@]}"; do
+  microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service \
+  microos-groups.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
+[[ -L /etc/systemd/system/sysinit.target.wants/microos-groups.service ]] || fail "microos-groups.service is not wanted by sysinit.target"
+systemctl cat microos-groups.service | grep -qx 'Before=systemd-sysusers.service systemd-update-done.service sysinit.target shutdown.target' ||
+  fail "microos-groups.service is not ordered before systemd-sysusers.service"
 [[ -L /etc/systemd/system/multi-user.target.wants/microos-bootlog-efi.path ]] || fail "microos-bootlog-efi.path is not wanted by multi-user.target"
 [[ $(systemctl is-enabled microos-bootlog-efi.service) == static ]] || fail "microos-bootlog-efi.service is not static"
 for u in "${tests[@]}"; do
@@ -129,6 +133,7 @@ kept=(
   /usr/lib/systemd/system/microos-bootlog-efi.path
   /usr/lib/systemd/system/microos-bootlog-efi.service
   /usr/lib/systemd/system/microos-grow-root.service
+  /usr/lib/systemd/system/microos-groups.service
   /usr/lib/systemd/system/microos-provision.service
   /usr/lib/systemd/system/microos-update-applied.service
   /usr/lib/systemd/system/microos-update-check.service
@@ -157,6 +162,7 @@ kept=(
   /usr/libexec/microos/microos-efi-log
   /usr/libexec/microos/microos-fail
   /usr/libexec/microos/microos-grow-root
+  /usr/libexec/microos/microos-groups
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-sdam
   /usr/libexec/microos/microos-slot
