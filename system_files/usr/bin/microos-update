@@ -97,6 +97,8 @@ confirmed() { [[ -f $rundir/boot-confirmed && $(< "$rundir/boot-confirmed") == "
 
 if [[ $mode == auto ]]; then
   if [[ -e $pause && -n $(find "$pause" -mmin -1440 2> /dev/null) ]]; then
+    install -d -m 0755 "$rundir"
+    printf 'state=paused\nchecked=%s\n' "$(now)" | write_file "$available"
     echo "$me: paused, $pause exists" >&2
     exit 3
   elif [[ -e $pause ]]; then
