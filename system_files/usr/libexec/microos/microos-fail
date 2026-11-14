@@ -60,7 +60,7 @@ if [[ -n $efi ]]; then
       if [[ -n $test && -r $sdamlib ]] && . "$sdamlib" && sdam_find && sdam_put clear; then
         say "fastboot preset cleared in ${sdam##*/}"
       fi
-    elif [[ -n $test ]]; then
+    elif [[ $test == 1 ]]; then
       if [[ -r $sdamlib ]] && . "$sdamlib" && sdam_find && sdam_put preset; then
         say "fastboot preset written in ${sdam##*/}, rebooting into the bootloader"
         sync
