@@ -83,36 +83,53 @@ if mkdir -p "$efi/logs" && echo "initrd=$initrd id=${id:-none} test=${test:-none
 fi
 
 restored=""
-if [ "$counted" = 1 ] && [ "$count" -ge "$MICROOS_BOOT_TRIES" ] && bootb_prev "$efi" "$id"; then
+once=""
+[ "$test" != once ] || once=1
+if [ "$counted" = 1 ] && { [ -n "$once" ] || [ "$count" -ge "$MICROOS_BOOT_TRIES" ]; }; then
+  msg=""
   img=$efi/microos/boot-prev.img
-  held=$(bootb_word "$bootb" microos.id) || held=""
-  da=$(bootb_disk "$boota" "$classblock") || da=""
-  db=$(bootb_disk "$bootb" "$classblock") || db=""
-  if [ "$held" != "$id" ]; then
-    msg="boot_b holds ${held:-no MicroOS image}, not $id, boot-prev.img not restored"
-  elif [ "$(bootb_size "$bootb")" != "$bootb_full" ] || [ "$(stat -c %s "$img")" != "$bootb_full" ]; then
-    msg="boot_b or boot-prev.img is not $bootb_full bytes, boot-prev.img not restored"
-  elif [ -z "$db" ] || [ "$da" != "$db" ]; then
-    msg="boot_b is not on the boot_a disk, boot-prev.img not restored"
+  if ! bootb_prev "$efi" "$id"; then
+    [ -z "$once" ] || msg="boot-prev.img is missing, does not match boot-prev.id or names $id, not restored"
   else
-    if [ -n "$test" ] && sdam_find && sdam_put clear; then
-      say "fastboot preset cleared in ${sdam##*/}"
-    fi
-    if bootb_write "$img" "$bootb" "$bootb_prev_sha" || bootb_write "$img" "$bootb" "$bootb_prev_sha"; then
-      restored=$bootb_prev_id
-      echo "$restored 0" > "$f.tmp" && mv -f "$f.tmp" "$f" || say "cannot write $f"
-      msg="restored $restored from boot-prev.img to $bootb after $count starts of $id"
+    held=$(bootb_word "$bootb" microos.id) || held=""
+    da=$(bootb_disk "$boota" "$classblock") || da=""
+    db=$(bootb_disk "$bootb" "$classblock") || db=""
+    if [ "$held" != "$id" ]; then
+      msg="boot_b holds ${held:-no MicroOS image}, not $id, boot-prev.img not restored"
+    elif [ "$(bootb_size "$bootb")" != "$bootb_full" ] || [ "$(stat -c %s "$img")" != "$bootb_full" ]; then
+      msg="boot_b or boot-prev.img is not $bootb_full bytes, boot-prev.img not restored"
+    elif [ -z "$db" ] || [ "$da" != "$db" ]; then
+      msg="boot_b is not on the boot_a disk, boot-prev.img not restored"
     else
-      msg="restore of $bootb_prev_id from boot-prev.img to $bootb failed"
+      if [ -z "$once" ] && [ -n "$test" ] && sdam_find && sdam_put clear; then
+        say "fastboot preset cleared in ${sdam##*/}"
+      fi
+      if bootb_write "$img" "$bootb" "$bootb_prev_sha" || bootb_write "$img" "$bootb" "$bootb_prev_sha"; then
+        restored=$bootb_prev_id
+        echo "$restored 0" > "$f.tmp" && mv -f "$f.tmp" "$f" || say "cannot write $f"
+        if [ -n "$once" ]; then
+          msg="restored $restored to boot_b at start $count of $id"
+        else
+          msg="restored $restored from boot-prev.img to $bootb after $count starts of $id"
+        fi
+      else
+        msg="restore of $bootb_prev_id from boot-prev.img to $bootb failed"
+      fi
+      if [ -n "$once" ] && sdam_find && sdam_put clear; then
+        say "fastboot preset cleared in ${sdam##*/}"
+      fi
     fi
   fi
-  say "$msg"
-  echo "$msg" >> "$log"
+  if [ -n "$msg" ]; then
+    [ -z "$once" ] || msg="once: $msg"
+    say "$msg"
+    echo "$msg" >> "$log"
+  fi
 fi
 sync
 
 [ -n "$dir" ] || umount "$mnt" || { say "cannot unmount $mnt"; rc=1; }
-if [ -n "$restored" ]; then
+if [ -n "$restored" ] && [ -z "$once" ]; then
   systemctl --no-block reboot || systemctl --force reboot
 fi
 exit "$rc"

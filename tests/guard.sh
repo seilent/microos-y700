@@ -242,6 +242,54 @@ run_guard
 kept "test image with no prev" 3
 [[ $(preset_of spmi_sdam1) == 04 ]] || fail "test image with no prev lost the preset: $(preset_of spmi_sdam1)"
 
+once() {
+  reset
+  cmdline microos.test=once
+  previmg "$@"
+  rm -f "$FAKE_STATE/dd.log"
+}
+reset
+cmdline microos.test=once
+run_guard || fail "once with no prev: exit $?: $(cat "$tmp/guard.err")"
+[[ $(attempts) == "$id 1" && $(nonzero spmi_sdam1) == 0 && $(restarts) == 0 ]] \
+  || fail "once with no prev: $(attempts), preset $(preset_of spmi_sdam1), $(restarts) reboots"
+once
+printf '\004' | dd of="$nv/spmi_sdam1/nvmem" bs=1 seek=72 conv=notrunc status=none
+rm -f "$FAKE_STATE/dd.log"
+run_guard || fail "once restore: exit $?: $(cat "$tmp/guard.err")"
+[[ $(sha256sum < "$MICROOS_BOOT_B") == $(sha256sum < "$efi/microos/boot-prev.img") ]] || fail "once restore: boot_b is not boot-prev.img"
+[[ $(attempts) == "$P 0" && $(restarts) == 0 ]] || fail "once restore: $(attempts), $(restarts) reboots"
+[[ $(tail -n 1 "$efi/logs/guard.txt") == "once: restored $P to boot_b at start 1 of $id" ]] \
+  || fail "once restore: guard.txt $(tail -n 1 "$efi/logs/guard.txt")"
+[[ $(preset_of spmi_sdam1) == 00 ]] || fail "once restore kept the preset: $(preset_of spmi_sdam1)"
+[[ $(sed -n '$p' "$FAKE_STATE/dd.log") == "dd of=nvmem" && $(grep -c 'of=boot_b' "$FAKE_STATE/dd.log") == 3 &&
+  $(grep -n 'of=nvmem' "$FAKE_STATE/dd.log" | head -n 1 | cut -d: -f1) == 4 ]] \
+  || fail "once restore: SDAM clear before the boot_b write: $(cat "$FAKE_STATE/dd.log")"
+once
+echo "$id 4" > "$efi/microos/boot-attempts"
+run_guard
+[[ $(tail -n 1 "$efi/logs/guard.txt") == "once: restored $P to boot_b at start 5 of $id" && $(restarts) == 0 ]] \
+  || fail "once restore at 5: guard.txt $(tail -n 1 "$efi/logs/guard.txt"), $(restarts) reboots"
+once "$P" bbbbbbbbbbbb
+run_guard
+kept "once RAM boot" 1
+notrestored "once RAM boot" "once: boot_b holds bbbbbbbbbbbb, not $id, boot-prev.img not restored"
+once
+printf 'x' | dd of="$efi/microos/boot-prev.img" bs=1 seek=4096 conv=notrunc status=none
+run_guard
+kept "once prev with a bad sha256" 1
+notrestored "once prev with a bad sha256" "once: boot-prev.img is missing, does not match boot-prev.id or names $id, not restored"
+once "$id"
+run_guard
+kept "once prev naming the running id" 1
+notrestored "once prev naming the running id" "once: boot-prev.img is missing, does not match boot-prev.id or names $id, not restored"
+once
+FAKE_DD_FAIL=1 run_guard || fail "once failed write: exit $?"
+kept "once failed write" 1
+notrestored "once failed write" "once: restore of $P from boot-prev.img to $MICROOS_BOOT_B failed"
+[[ $(grep -c 'of=boot_b' "$FAKE_STATE/dd.log") == 2 && $(nonzero spmi_sdam1) == 0 ]] \
+  || fail "once failed write: $(cat "$FAKE_STATE/dd.log"), preset $(preset_of spmi_sdam1)"
+
 reset
 cmdline
 if env MICROOS_CMDLINE="$tmp/cmdline" MICROOS_EFI_DEV="$tmp/missing" MICROOS_NVMEM_ROOT="$nv" sh "$guard" 2> /dev/null; then
@@ -406,6 +454,22 @@ for c in "self 1 1" "bad 1 0" "self 0 1" "bad 0 0" "held 1 0" "size 1 0" "held 0
   else
     [[ $(reboots) == 1 && $(bootloader_reboots) == 0 && $(nonzero spmi_sdam1) == 0 ]] || fail "$name: reboots $(reboots), preset $(preset_of spmi_sdam1)"
   fi
+done
+
+for p in valid none; do
+  name="once image at 3 tries, prev $p"
+  reset
+  cmdline microos.test=once
+  if [[ $p == valid ]]; then
+    previmg
+  else
+    mkdir -p "$efi/microos"
+  fi
+  echo "$id 3" > "$efi/microos/boot-attempts"
+  printf 'MICROOS_SLOT_WRITE=1\nMICROOS_BOOT_TRIES=3\n' > "$slotconf"
+  run_fail emergency
+  [[ $(reboots) == 1 && $(bootloader_reboots) == 0 && $(nonzero spmi_sdam1) == 0 ]] \
+    || fail "$name: reboots $(reboots), bootloader $(bootloader_reboots), preset $(preset_of spmi_sdam1): $(cat "$tmp/fail.err")"
 done
 
 own=$tmp/own
