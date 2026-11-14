@@ -4,7 +4,7 @@ set -euo pipefail
 me=microos-bootimg-update
 die() { echo "$me: $*" >&2; exit 1; }
 say() { echo "$me: $*" >&2; }
-usage="usage: $me --tree <dir> (--deployment <checksum>.<serial> [--initrd-from <checksum>.<serial>] [--drill] | --restore-prev | --status)"
+usage="usage: $me --tree <dir> (--deployment <checksum>.<serial> [--initrd-from <checksum>.<serial>] [--drill] | --test <img> [--replace-prev] | --restore-prev | --status)"
 
 rundir=${MICROOS_RUNDIR:-/run/microos}
 statedir=${MICROOS_STATEDIR:-/var/lib/microos}
@@ -14,13 +14,15 @@ cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 bootb=${MICROOS_BOOT_B:-/dev/disk/by-partlabel/boot_b}
 cmdmax=440
 
-tree="" mode="" deploy="" from="" drill=0
+tree="" mode="" deploy="" from="" drill=0 img="" replace=0
 while (( $# )); do
   case $1 in
     --tree) tree=${2:?$usage}; shift 2 ;;
     --deployment) [[ -z $mode ]] || die "$usage"; mode=deploy deploy=${2:?$usage}; shift 2 ;;
     --initrd-from) from=${2:?$usage}; shift 2 ;;
     --drill) drill=1; shift ;;
+    --test) [[ -z $mode ]] || die "$usage"; mode=test img=${2:?$usage}; shift 2 ;;
+    --replace-prev) replace=1; shift ;;
     --restore-prev) [[ -z $mode ]] || die "$usage"; mode=restore; shift ;;
     --status) [[ -z $mode ]] || die "$usage"; mode=status; shift ;;
     *) die "$usage" ;;
@@ -28,6 +30,7 @@ while (( $# )); do
 done
 [[ -n $tree && -n $mode ]] || die "$usage"
 [[ $mode == deploy || ( -z $from && $drill == 0 ) ]] || die "$usage"
+[[ $mode == test || $replace == 0 ]] || die "$usage"
 re='^[0-9a-f]{64}\.[0-9]+$'
 [[ $mode != deploy || $deploy =~ $re ]] || die "--deployment is <checksum>.<serial>, got '$deploy'"
 [[ -z $from || $from =~ $re ]] || die "--initrd-from is <checksum>.<serial>, got '$from'"
@@ -35,6 +38,11 @@ from=${from:-$deploy}
 (( EUID == 0 )) || die "run as root"
 tree=$(realpath -e "$tree") || die "no tree $tree"
 t=${tree%/}
+if [[ $mode == test ]]; then
+  img=$(realpath -e "$img") || die "no image $img"
+  deploy=${t##*/} from=${t##*/}
+  [[ $deploy =~ $re ]] || die "--tree $t is not a deployment dir"
+fi
 slot=${MICROOS_SLOT:-$t/usr/libexec/microos/microos-slot}
 stubconf=$t/usr/lib/microos/stub/stub-preset-free.conf
 . "$t/usr/libexec/microos/microos-bootb"
@@ -61,6 +69,12 @@ if [[ $mode == status ]]; then
   fi
   if [[ -f $statedir/bootimg-update ]]; then
     sed 's/^/record /' "$statedir/bootimg-update"
+  fi
+  if [[ -f $statedir/testboot ]]; then
+    sed 's/^/testboot /' "$statedir/testboot"
+  fi
+  if [[ -f $esp/microos/testboot.id ]]; then
+    echo "testboot.id $(< "$esp/microos/testboot.id")"
   fi
   "$slot" status || true
   exit 0
@@ -96,7 +110,8 @@ flash() {
 }
 
 record() {
-  local f=$statedir/bootimg-update r
+  local f=$1 r
+  shift
   install -d -m 0755 "$statedir"
   r=$(mktemp "$f.XXXXXX")
   printf '%s\n' "$@" > "$r"
@@ -119,7 +134,7 @@ if [[ $mode == restore ]]; then
   device
   rec=("target=$(bootb_word "$prev" microos.deploy || true)" "armed=$pid" "prev=$pid")
   [[ $pid != "$running" ]] || rec+=("confirmed=$pid")
-  record "${rec[@]}"
+  record "$statedir/bootimg-update" "${rec[@]}"
   arm
   flash "$prev" "$psha" || die "boot-prev.img did not read back from boot_b"
   echo "$me: boot_b holds boot-prev.img ($pid), slot b armed"
@@ -137,12 +152,14 @@ done
 [[ -f $rundir/boot-confirmed && $(< "$rundir/boot-confirmed") == "$booted" ]] || die "the booted deployment $booted is not confirmed"
 [[ $(bootb_word "$bootb" microos.id || true) == "$running" ]] || die "boot_b does not hold the running image $running"
 tdir=$(realpath -e "$sysroot/ostree/deploy/$(stateroot "$deploy")/deploy/$deploy") || die "no deployment dir for $deploy"
+[[ $mode != test || $tdir == "$t" ]] || die "--tree $t is not the deployment dir of $deploy, $tdir is"
 [[ -f $stubconf && -f $tdir/usr/lib/microos/stub.conf &&
   $(sha256sum < "$stubconf") == $(sha256sum < "$tdir/usr/lib/microos/stub.conf") ]] ||
   die "$stubconf differs from $tdir/usr/lib/microos/stub.conf"
 device
 
 if jq -e 'any(.deployments[]; .staged)' <<< "$status" > /dev/null; then
+  [[ $mode != test ]] || die "a deployment is staged, the reboot after --test would finalize it"
   ostree admin finalize-staged || die "ostree admin finalize-staged failed"
   read_status
   [[ -n $(stateroot "$deploy") && -n $(stateroot "$from") ]] || die "finalize-staged changed the deployment ids"
@@ -166,6 +183,7 @@ entry_of() {
   die "no BLS entry under $sysroot boots $1"
 }
 bls() { sed -n "s/^$1[[:space:]]\+//p" "$2"; }
+field() { sed -n "s/^$1: \{0,1\}//p" <<< "$info"; }
 modules() {
   local m
   m=$(cd "$1/usr/lib/modules/$2" && find . -type f -name '*.ko*' -print0 | LC_ALL=C sort -z | xargs -0r sha256sum) ||
@@ -200,6 +218,7 @@ case $panel in
   *_csot_*) dvar=MICROOS_DTB_CSOT ;;
   *) die "msm_drm.dsi_display0='$panel' names no known panel" ;;
 esac
+[[ $mode != test || $dvar == MICROOS_DTB ]] || die "--test images carry the BOE DTB, the running panel is $panel"
 dtbrel=$(sed -n "s/^$dvar=//p" "$tdir/usr/lib/microos/bootimg.conf" | tr -d "\"'")
 [[ -n $dtbrel ]] || die "$tdir/usr/lib/microos/bootimg.conf has no $dvar"
 dtb=$tdir/usr/lib/modules/$kver/dtb/$dtbrel
@@ -209,19 +228,88 @@ work=$(mktemp -d)
 trap 'rm -rf "${work:?}"' EXIT
 mkdir -p "$esp/microos"
 prev=$esp/microos/boot-prev.img
-pt=$prev.tmp
-dd if="$dev" of="$pt" bs=1048576 count="$size" iflag=direct,count_bytes status=none || die "cannot read $dev"
-sync "$pt"
-psha=$(sha256sum < "$pt")
-psha=${psha%% *}
-[[ $(bootb_sha "$dev" "$size") == "$psha" ]] || die "boot-prev.img.tmp differs from boot_b"
-mv -f "$pt" "$prev"
-sync "$esp/microos"
-echo "$running $psha" > "$esp/microos/boot-prev.id.tmp"
-sync "$esp/microos/boot-prev.id.tmp"
-mv -f "$esp/microos/boot-prev.id.tmp" "$esp/microos/boot-prev.id"
-sync "$esp/microos"
-say "boot_b ($running) saved to $prev"
+psha=""
+save_prev() {
+  local pt=$prev.tmp
+  dd if="$dev" of="$pt" bs=1048576 count="$size" iflag=direct,count_bytes status=none || die "cannot read $dev"
+  sync "$pt"
+  psha=$(sha256sum < "$pt")
+  psha=${psha%% *}
+  [[ $(bootb_sha "$dev" "$size") == "$psha" ]] || die "boot-prev.img.tmp differs from boot_b"
+  mv -f "$pt" "$prev"
+  sync "$esp/microos"
+  echo "$running $psha" > "$esp/microos/boot-prev.id.tmp"
+  sync "$esp/microos/boot-prev.id.tmp"
+  mv -f "$esp/microos/boot-prev.id.tmp" "$esp/microos/boot-prev.id"
+  sync "$esp/microos"
+  say "boot_b ($running) saved to $prev"
+}
+
+if [[ $mode == test ]]; then
+  rec=$statedir/bootimg-update
+  if [[ -f $rec ]] && grep -qxF "armed=$running" "$rec" && ! grep -qxF "confirmed=$running" "$rec"; then
+    die "$rec has armed=$running without confirmed=$running"
+  fi
+  if (( ! replace )) && bootb_prev "$esp" "$running"; then
+    die "boot-prev.img holds $bootb_prev_id, not the running image, --replace-prev replaces it"
+  fi
+  jq -e --arg id "$deploy" 'any(.deployments[]; .pinned and "\(.checksum).\(.serial)" == $id)' <<< "$status" > /dev/null ||
+    die "$deploy is not pinned"
+  [[ $(stat -c %s "$img") == "$size" ]] || die "$img is not $size bytes"
+  info=$(unpack_bootimg --boot_img "$img" --out "$work/t") || die "unpack_bootimg failed on $img"
+  hcmd=$(field "command line args")
+  [[ $(field "boot image header version") == 2 ]] || die "$img header version $(field "boot image header version")"
+  (( ${#hcmd} <= cmdmax )) || die "$img cmdline is ${#hcmd} bytes"
+  tests=() krounds=0 maxcpus=0 tid="" tdeploy=""
+  read -ra words <<< "$hcmd"
+  for w in "${words[@]}"; do
+    case $w in
+      microos.test=*) tests+=("${w#microos.test=}") ;;
+      microos.kround=*) krounds=$(( krounds + 1 )) ;;
+      microos.id=*) tid=${w#microos.id=} ;;
+      microos.deploy=*) tdeploy=${w#microos.deploy=} ;;
+      maxcpus=7) maxcpus=1 ;;
+    esac
+  done
+  [[ ${#tests[@]} == 1 && ${tests[0]} == once ]] || die "$img cmdline needs one microos.test=, and it is once: $hcmd"
+  (( krounds == 1 )) || die "$img cmdline needs one microos.kround=: $hcmd"
+  (( maxcpus )) || die "$img cmdline has no maxcpus=7: $hcmd"
+  [[ $tid =~ ^[0-9a-f]{12}$ && $tid != "$running" ]] || die "$img microos.id '$tid' is not a new image id"
+  [[ $tdeploy == "$deploy" ]] || die "$img has microos.deploy=$tdeploy, not $deploy"
+  [[ $(sha256sum < "$work/t/ramdisk") == $(sha256sum < "$initrd") ]] || die "$img ramdisk is not the initrd of $deploy"
+  . "$stubconf"
+  gzip -dc < "$work/t/kernel" > "$work/t/Image" || die "$img kernel is not gzip"
+  tail -c +$(( MICROOS_STUB_PAYLOAD + 1 )) "$work/t/Image" > "$work/t/payload"
+  "$t/usr/libexec/microos/microos-stub-pack" "$work/t/payload" "$work/t/packed" > /dev/null ||
+    die "microos-stub-pack refused the payload of $img"
+  [[ $(sha256sum < "$work/t/Image") == $(sha256sum < "$work/t/packed") ]] ||
+    die "$img kernel is not the preset free stub of $t with its payload"
+  rm -rf "${work:?}/t"
+  avbtool info_image --image "$img" > /dev/null || die "avbtool info_image failed on $img"
+  . "$t/usr/libexec/microos/microos-sdam"
+  sdam_find || die "no SDAM nvram@7100, the fastboot preset is not checked"
+  sdam_put clear || die "the fastboot preset in ${sdam##*/} did not clear"
+  say "fastboot preset clear in ${sdam##*/}"
+  isha=$(sha256sum < "$img")
+  isha=${isha%% *}
+
+  save_prev
+  record "$statedir/testboot" "test=$tid" "prev=$running" "deploy=$deploy"
+  echo "$tid $running" > "$esp/microos/testboot.id.tmp"
+  sync "$esp/microos/testboot.id.tmp"
+  mv -f "$esp/microos/testboot.id.tmp" "$esp/microos/testboot.id"
+  sync "$esp/microos"
+  arm
+  if ! flash "$img" "$isha"; then
+    say "boot_b read back differs from ${img##*/} twice, writing boot-prev.img back"
+    flash "$prev" "$psha" || die "boot-prev.img did not read back from boot_b either"
+    die "boot_b holds boot-prev.img ($running) again"
+  fi
+  echo "$me: boot_b holds the test image $tid, boot-prev.img holds $running, slot b armed"
+  exit 0
+fi
+
+save_prev
 
 "$t/usr/libexec/microos/microos-stub-pack" "$kernel" "$work/kernel" >&2 || die "microos-stub-pack failed"
 args=(--maxcpus 7)
@@ -232,7 +320,6 @@ nid=$(bash "$tdir/usr/libexec/microos/microos-bootimg-build" --root "$tdir" --ke
 nid=${nid:0:12}
 info=$(unpack_bootimg --boot_img "$new.tmp" --out "$work/u") || die "unpack_bootimg failed on $new.tmp"
 rm -rf "${work:?}/u"
-field() { sed -n "s/^$1: \{0,1\}//p" <<< "$info"; }
 hcmd=$(field "command line args")
 [[ $(field "boot image header version") == 2 ]] || die "$new.tmp header version $(field "boot image header version")"
 (( ${#hcmd} <= cmdmax )) || die "$new.tmp cmdline is ${#hcmd} bytes"
@@ -245,12 +332,13 @@ sync "$esp/microos"
 nsha=$(sha256sum < "$new")
 nsha=${nsha%% *}
 
-record "target=$deploy" "armed=$nid" "prev=$running"
+record "$statedir/bootimg-update" "target=$deploy" "armed=$nid" "prev=$running"
 arm
 if ! flash "$new" "$nsha"; then
   say "boot_b read back differs from boot-new.img twice, writing boot-prev.img back"
   flash "$prev" "$psha" || die "boot-prev.img did not read back from boot_b either"
-  record "target=$(bootb_word "$prev" microos.deploy || true)" "armed=$running" "prev=$running" "confirmed=$running"
+  record "$statedir/bootimg-update" "target=$(bootb_word "$prev" microos.deploy || true)" "armed=$running" "prev=$running" \
+    "confirmed=$running"
   die "boot_b holds boot-prev.img ($running) again"
 fi
 echo "$me: boot_b holds $nid for $deploy, boot-prev.img holds $running, slot b armed"

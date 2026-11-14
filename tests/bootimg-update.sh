@@ -14,6 +14,7 @@ sha() { sha256sum < "$1" | cut -d' ' -f1; }
 export FAKE_STATE=$tmp/fake MICROOS_SYSROOT=$tmp/sysroot MICROOS_ESP=$tmp/esp MICROOS_RUNDIR=$tmp/run
 export MICROOS_STATEDIR=$tmp/state MICROOS_CMDLINE=$tmp/cmdline MICROOS_BOOT_B=$tmp/boot_b
 export MICROOS_SLOT=$here/bootimg-update/bin/microos-slot PATH=$here/bootimg-update/bin:$PATH
+export MICROOS_NVMEM_ROOT=$tmp/nvmem MICROOS_SDAM_TRIES=1
 as=()
 (( EUID == 0 )) || as=(unshare -r)
 
@@ -31,7 +32,7 @@ panel=msm_drm.dsi_display0=qcom,mdss_dsi_kirby_nt36523_boe_dsc_vid:
 
 t=$tmp/tree
 mkdir -p "$t/usr/libexec/microos" "$t/usr/lib/microos/stub"
-for f in microos-bootimg-update microos-stub-pack microos-bootb; do
+for f in microos-bootimg-update microos-stub-pack microos-bootb microos-sdam; do
   cp "$tree/usr/libexec/microos/$f" "$t/usr/libexec/microos/"
 done
 cp "$tree/usr/lib/microos/stub.conf" "$t/usr/lib/microos/stub/stub-preset-free.conf"
@@ -53,7 +54,8 @@ deployment() {
   mkdir -p "$d/usr/lib/microos" "$d/usr/libexec/microos" "$d/usr/share/microos/avb" "$d/usr/lib/modules/$kver/dtb/qcom" \
     "$d/usr/lib/modules/$kver/kernel/drivers" "$sys/ostree/boot.1/default/$bc" "$sys/boot/ostree/default-$bc" "$ent"
   cp "$tree/usr/lib/microos/bootimg.conf" "$tree/usr/lib/microos/stub.conf" "$d/usr/lib/microos/"
-  cp "$tree/usr/libexec/microos/microos-bootimg-build" "$d/usr/libexec/microos/"
+  cp "$tree/usr/libexec/microos/microos-bootimg-build" "$t"/usr/libexec/microos/* "$d/usr/libexec/microos/"
+  cp -r "$t/usr/lib/microos/stub" "$d/usr/lib/microos/"
   cp "$tree/usr/share/microos/avb/testkey_rsa4096.pem" "$d/usr/share/microos/avb/"
   echo "IMAGE_VERSION=20261112.927c913" > "$d/usr/lib/microos/version"
   cp "$tmp/Image" "$d/usr/lib/modules/$kver/vmlinuz"
@@ -75,7 +77,9 @@ st() {
     fl=${e#"$id"}
     d+=("$(jq -c --arg c "${id%.*}" --argjson s "${id##*.}" --argjson i "$i" \
       --argjson b "$([[ $fl == *b* ]] && echo true || echo false)" --argjson g "$([[ $fl == *s* ]] && echo true || echo false)" \
-      '.deployments[0] | .checksum = $c | .serial = $s | .index = $i | .booted = $b | .staged = $g' "$here/bootimg-update/status.json")")
+      --argjson p "$([[ $fl == *p* ]] && echo true || echo false)" \
+      '.deployments[0] | .checksum = $c | .serial = $s | .index = $i | .booted = $b | .staged = $g | .pinned = $p' \
+      "$here/bootimg-update/status.json")")
     i=$(( i + 1 ))
   done
   printf '%s\n' "${d[@]}" | jq -s '{deployments: .}' > "$FAKE_STATE/status.json"
@@ -90,8 +94,10 @@ printf '%s' "ostree=/ostree/boot.1/default/$(c 1)/0 root=PARTLABEL=microos micro
 head -c 65536 /dev/urandom | put "$runimg" 1048576
 
 reset() {
-  rm -rf "$sys" "$MICROOS_ESP" "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$FAKE_STATE"
-  mkdir -p "$MICROOS_ESP" "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$FAKE_STATE"
+  rm -rf "$sys" "$MICROOS_ESP" "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$FAKE_STATE" "$MICROOS_NVMEM_ROOT"
+  mkdir -p "$MICROOS_ESP" "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$FAKE_STATE" "$MICROOS_NVMEM_ROOT/spmi_sdam1" "$tmp/dt/nvram@7100"
+  head -c 256 /dev/zero > "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem"
+  ln -sfn "$tmp/dt/nvram@7100" "$MICROOS_NVMEM_ROOT/spmi_sdam1/of_node"
   deployment "$A" "$(c 1)" A 2
   deployment "$N" "$(c 2)" N 1
   st "$A b" "$N"
@@ -344,6 +350,196 @@ run --deployment "$A" --drill || fail "drill: $(cat "$tmp/out")"
 unpack "$new"
 [[ " $hcmd " == *" root=PARTLABEL=microos_missing "* && " $hcmd " != *" root=PARTLABEL=microos "* ]] || fail "drill cmdline: $hcmd"
 same "$prev" "$runimg" || fail "drill: boot-prev.img is not the running image"
+
+D=$sys/ostree/deploy/default/deploy/$A
+dtool=$D/usr/libexec/microos/microos-bootimg-update
+trun() { "${as[@]}" "$dtool" --tree "${TREE:-$D}" "$@" > "$tmp/out" 2>&1; }
+trun_rc() { r=0; trun "$@" || r=$?; }
+sdam() { od -An -tx1 -j72 -N1 "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" | tr -d ' \n'; }
+tworder() {
+  grep -E '^(mv -f [^ ]*(boot-prev\.(img|id)|testboot\.id)\.tmp |mv -fT [^ ]*/(bootimg-update|testboot)\.|microos-slot arm|dd )' \
+    "$FAKE_STATE/events" | sed -E "s#^mv -fT [^ ]*/(bootimg-update|testboot)\..*#record \1#; s#$MICROOS_ESP/microos/##g; s#$MICROOS_BOOT_B#B#g; s#$tmp/imgs/##g" \
+    | awk '{ l = $1 " " $2 " " $3; sub(/ +$/, "", l); print l }'
+}
+tuntouched() {
+  same "$MICROOS_BOOT_B" "${2:-$runimg}" || fail "$1: boot_b changed"
+  [[ $(armed) == 0 ]] || fail "$1: slot armed"
+  [[ ! -e $MICROOS_STATEDIR/testboot && ! -e $MICROOS_ESP/microos/testboot.id ]] || fail "$1: testboot record written"
+  [[ ! -e $MICROOS_ESP/microos/boot-prev.img || -n ${3:-} ]] || fail "$1: boot-prev.img written"
+}
+trefused() {
+  local name=$1 why=$2
+  shift 2
+  trun_rc "$@"
+  (( r != 0 )) || fail "$name: exit 0"
+  [[ $(cat "$tmp/out") == *"$why"* ]] || fail "$name: $(cat "$tmp/out")"
+  tuntouched "$name"
+}
+mkdir -p "$tmp/imgs"
+"$t/usr/libexec/microos/microos-stub-pack" "$tmp/Image" "$tmp/imgs/kernel" > /dev/null
+cp "$t/usr/lib/microos/stub/stub-preset-free.bin" "$tmp/other-prefix.bin"
+printf 'x' | put "$tmp/other-prefix.bin" 4096
+"$t/usr/libexec/microos/microos-stub-pack" --prefix "$tmp/other-prefix.bin" "$tmp/Image" "$tmp/imgs/preset-kernel" > /dev/null
+reset
+st "$A bp" "$N"
+opts() { sed -n 's/^options //p' "$ent/ostree-$1-default.conf"; }
+tbake() {
+  local out=$1 dep=$2 n=$3 init=$4 kernel=$5 extra=$6
+  shift 6
+  bash "$dep/usr/libexec/microos/microos-bootimg-build" --root "$dep" --kernel "$kernel" \
+    --initrd "$sys/boot/ostree/default-$init/initramfs-$kver.img" --dtb "$dep/usr/lib/modules/$kver/dtb/$MICROOS_DTB" \
+    --options "$(opts "$n") $extra" --sysroot "$sys" --out "$tmp/imgs/$out" "$@" | cut -c1-12
+}
+NDIR=$sys/ostree/deploy/default/deploy/$N
+tid=$(tbake once.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" microos.kround=p2c --test once --maxcpus 7)
+tbake test1.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" microos.kround=p2c --test 1 --maxcpus 7 > /dev/null
+tbake both.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" "microos.kround=p2c microos.test=1" --test once --maxcpus 7 > /dev/null
+tbake twice.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" "microos.kround=p2c microos.test=once" --test once --maxcpus 7 > /dev/null
+tbake nokround.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" "" --test once --maxcpus 7 > /dev/null
+tbake maxcpus1.img "$D" 2 "$(c 1)" "$tmp/imgs/kernel" microos.kround=p2c --test once --maxcpus 1 > /dev/null
+tbake preset.img "$D" 2 "$(c 1)" "$tmp/imgs/preset-kernel" microos.kround=p2c --test once --maxcpus 7 > /dev/null
+tbake ninitrd.img "$D" 2 "$(c 2)" "$tmp/imgs/kernel" microos.kround=p2c --test once --maxcpus 7 > /dev/null
+tbake ndeploy.img "$NDIR" 1 "$(c 2)" "$tmp/imgs/kernel" microos.kround=p2c --test once --maxcpus 7 > /dev/null
+cp "$tmp/imgs/once.img" "$tmp/imgs/big.img"
+truncate -s $(( size + 4096 )) "$tmp/imgs/big.img"
+oimg=$tmp/imgs/once.img
+[[ $tid =~ ^[0-9a-f]{12}$ && $tid != "$RUN" ]] || fail "test image id '$tid'"
+
+reset
+st "$A bp" "$N"
+printf '\005' | put "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" 72
+trun --test "$oimg" || fail "test: $(cat "$tmp/out")"
+same "$MICROOS_BOOT_B" "$oimg" || fail "test: boot_b is not the test image"
+same "$MICROOS_ESP/microos/boot-prev.img" "$runimg" || fail "test: boot-prev.img is not the running image"
+[[ $(cat "$MICROOS_ESP/microos/boot-prev.id") == "$RUN $(sha "$runimg")" ]] || fail "test: boot-prev.id $(cat "$MICROOS_ESP/microos/boot-prev.id")"
+[[ $(cat "$MICROOS_STATEDIR/testboot") == "test=$tid"$'\n'"prev=$RUN"$'\n'"deploy=$A" ]] \
+  || fail "test record: $(cat "$MICROOS_STATEDIR/testboot")"
+[[ $(cat "$MICROOS_ESP/microos/testboot.id") == "$tid $RUN" ]] || fail "testboot.id: $(cat "$MICROOS_ESP/microos/testboot.id")"
+[[ ! -e $MICROOS_STATEDIR/bootimg-update ]] || fail "test wrote bootimg-update: $(cat "$MICROOS_STATEDIR/bootimg-update")"
+[[ $(armed) == 1 && $(sdam) == 01 ]] || fail "test: arm calls $(armed), SDAM byte $(sdam)"
+[[ -z $(find "$MICROOS_ESP" -name '*.tmp') ]] || fail "test left tmp files: $(find "$MICROOS_ESP" -name '*.tmp')"
+want="mv -f boot-prev.img.tmp
+mv -f boot-prev.id.tmp
+record testboot
+mv -f testboot.id.tmp
+microos-slot arm
+dd if=/dev/zero of=B
+dd if=once.img of=B
+dd if=once.img of=B"
+[[ $(tworder) == "$want" ]] || fail "test save, record, arm and write order: $(tworder)"
+trun --status || fail "test status: $(cat "$tmp/out")"
+for l in "boot_b $tid" "prev $RUN" "testboot test=$tid" "testboot prev=$RUN" "testboot deploy=$A" "testboot.id $tid $RUN"; do
+  grep -qxF "$l" "$tmp/out" || fail "test status lacks '$l': $(cat "$tmp/out")"
+done
+: > "$FAKE_STATE/slot.log"
+trun --restore-prev || fail "test undo before the reboot: $(cat "$tmp/out")"
+same "$MICROOS_BOOT_B" "$runimg" || fail "test undo: boot_b is not boot-prev.img"
+
+reset
+st "$A bp" "$N"
+printf 'target=%s\narmed=ba86ce5bf551\nprev=%s\n' "$A" "$RUN" > "$MICROOS_STATEDIR/bootimg-update"
+cp "$MICROOS_STATEDIR/bootimg-update" "$tmp/drill.rec"
+trun --test "$oimg" || fail "test after a drill record: $(cat "$tmp/out")"
+same "$MICROOS_STATEDIR/bootimg-update" "$tmp/drill.rec" || fail "test after a drill record changed bootimg-update"
+same "$MICROOS_BOOT_B" "$oimg" || fail "test after a drill record: boot_b is not the test image"
+
+reset
+st "$A bp" "$N"
+printf 'target=%s\narmed=%s\nprev=%s\n' "$A" "$RUN" "$RUN" > "$MICROOS_STATEDIR/bootimg-update"
+trefused "armed running image never confirmed" "has armed=$RUN without confirmed=$RUN" --test "$oimg"
+reset
+st "$A bp" "$N"
+printf 'target=%s\narmed=%s\nprev=%s\nconfirmed=%s\n' "$A" "$RUN" "$RUN" "$RUN" > "$MICROOS_STATEDIR/bootimg-update"
+trun --test "$oimg" || fail "test after a confirmed record: $(cat "$tmp/out")"
+
+reset
+st "$A bp" "$N"
+cp "$runimg" "$tmp/other-prev.img"
+printf 'bbbbbbbbbbbb' | put "$tmp/other-prev.img" 4096
+mkdir -p "$MICROOS_ESP/microos"
+cp "$tmp/other-prev.img" "$MICROOS_ESP/microos/boot-prev.img"
+echo "bbbbbbbbbbbb $(sha "$tmp/other-prev.img")" > "$MICROOS_ESP/microos/boot-prev.id"
+trun_rc --test "$oimg"
+(( r != 0 )) && [[ $(cat "$tmp/out") == *"boot-prev.img holds bbbbbbbbbbbb, not the running image, --replace-prev replaces it"* ]] \
+  || fail "prev naming another id: $(cat "$tmp/out")"
+tuntouched "prev naming another id" "$runimg" keep
+same "$MICROOS_ESP/microos/boot-prev.img" "$tmp/other-prev.img" || fail "prev naming another id: boot-prev.img changed"
+trun --test "$oimg" --replace-prev || fail "--replace-prev: $(cat "$tmp/out")"
+[[ $(cat "$MICROOS_ESP/microos/boot-prev.id") == "$RUN $(sha "$runimg")" ]] || fail "--replace-prev: boot-prev.id $(cat "$MICROOS_ESP/microos/boot-prev.id")"
+reset
+st "$A bp" "$N"
+mkdir -p "$MICROOS_ESP/microos"
+cp "$runimg" "$MICROOS_ESP/microos/boot-prev.img"
+echo "$RUN $(sha "$runimg")" > "$MICROOS_ESP/microos/boot-prev.id"
+trun --test "$oimg" || fail "prev naming the running id: $(cat "$tmp/out")"
+
+for c in "test1.img|needs one microos.test=, and it is once" "both.img|needs one microos.test=, and it is once" \
+  "twice.img|needs one microos.test=, and it is once" "nokround.img|needs one microos.kround=" \
+  "maxcpus1.img|has no maxcpus=7" "preset.img|is not the preset free stub" "ninitrd.img|ramdisk is not the initrd of $A" \
+  "ndeploy.img|has microos.deploy=$N, not $A" "big.img|is not $size bytes"; do
+  reset
+  st "$A bp" "$N"
+  trefused "test ${c%%|*}" "${c#*|}" --test "$tmp/imgs/${c%%|*}"
+done
+reset
+st "$A b" "$N"
+trefused "test unpinned" "$A is not pinned" --test "$oimg"
+reset
+st "$A bp" "$N s"
+trefused "test staged" "a deployment is staged" --test "$oimg"
+grep -q finalize-staged "$FAKE_STATE/ostree.log" && fail "test staged ran finalize-staged"
+reset
+st "$A bp" "$N"
+rm "$MICROOS_RUNDIR/boot-confirmed"
+trefused "test unconfirmed" "is not confirmed" --test "$oimg"
+reset
+st "$A bp" "$N"
+echo "root=PARTLABEL=microos ro microos.id=ba9876543210 $panel" > "$MICROOS_CMDLINE"
+trefused "test boot_b not running" "boot_b does not hold the running image" --test "$oimg"
+reset
+st "$A bp" "$N"
+cp "$oimg" "$MICROOS_BOOT_B"
+echo "root=PARTLABEL=microos ro microos.id=$tid $panel" > "$MICROOS_CMDLINE"
+trun_rc --test "$oimg"
+(( r != 0 )) && [[ $(cat "$tmp/out") == *"microos.id '$tid' is not a new image id"* ]] || fail "test same id: $(cat "$tmp/out")"
+tuntouched "test same id" "$oimg"
+reset
+st "$A bp" "$N"
+echo "root=PARTLABEL=microos ro microos.id=$RUN msm_drm.dsi_display0=qcom,mdss_dsi_kirby_nt36523_csot_dsc_vid:" > "$MICROOS_CMDLINE"
+trefused "test csot panel" "carry the BOE DTB" --test "$oimg"
+reset
+st "$A bp" "$N"
+rm "$MICROOS_NVMEM_ROOT/spmi_sdam1/of_node"
+trefused "test no SDAM" "no SDAM nvram@7100" --test "$oimg"
+reset
+st "$A bp" "$N"
+( exec 7> "$MICROOS_RUNDIR/update.lock"; flock 7; exec sleep 5 ) &
+holder=$!
+sleep 0.3
+trefused "test lock busy" "update.lock is busy" --test "$oimg"
+kill "$holder" 2> /dev/null || true
+wait "$holder" 2> /dev/null || true
+reset
+st "$A bp" "$N"
+TREE=$t trefused "test tree not a deployment" "is not a deployment dir" --test "$oimg"
+for a in "--test $oimg --deployment $A" "--replace-prev" "--deployment $A --replace-prev" "--test $oimg --drill" "--test"; do
+  reset
+  st "$A bp" "$N"
+  trefused "test usage '$a'" "" $a
+done
+
+reset
+st "$A bp" "$N"
+FAKE_ARM_RC=1 trun_rc --test "$oimg"
+(( r != 0 )) && [[ $(cat "$tmp/out") == *"microos-slot arm failed, boot_b untouched"* ]] || fail "test arm failure: $(cat "$tmp/out")"
+same "$MICROOS_BOOT_B" "$runimg" && [[ $(writes) == 0 && -e $MICROOS_STATEDIR/testboot ]] \
+  || fail "test arm failure: boot_b written or no record before the arm"
+reset
+st "$A bp" "$N"
+echo 2 > "$FAKE_STATE/dd-bad"
+trun_rc --test "$oimg"
+(( r != 0 )) && [[ $(cat "$tmp/out") == *"boot_b holds boot-prev.img ($RUN) again"* ]] || fail "test two write mismatches: $(cat "$tmp/out")"
+same "$MICROOS_BOOT_B" "$runimg" && [[ $(writes) == 9 ]] || fail "test two write mismatches: $(writes) writes"
 
 if (( rc == 0 )); then
   echo "bootimg-update: ok"
