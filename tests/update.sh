@@ -63,10 +63,10 @@ pdir=$tmp/ostree/deploy/default/deploy/$csum_s.0
 initrd() {
   local d=$tmp/initrd.d
   rm -rf "$d"
-  mkdir -p "$d/usr/lib64" "$d/usr/bin" "$d/etc"
+  mkdir -p "$d/usr/lib64" "$d/usr/bin" "$d/usr/lib" "$d/etc"
   echo "$2" > "$d/etc/microos-initrd-id"
-  touch "$d/usr/lib64/libc.so.6" "$d/usr/bin/sh" "$d/etc/udev.conf"
-  (cd "$d" && printf '%s\n' . usr usr/lib64 usr/lib64/libc.so.6 usr/bin usr/bin/sh etc etc/microos-initrd-id etc/udev.conf |
+  touch "$d/usr/lib64/libc.so.6" "$d/usr/bin/sh" "$d/etc/udev.conf" "$d/usr/lib/os-release"
+  (cd "$d" && printf '%s\n' . usr usr/lib64 usr/lib64/libc.so.6 usr/bin usr/bin/sh usr/lib usr/lib/os-release etc etc/microos-initrd-id etc/udev.conf |
     cpio -o -H newc --quiet 2> /dev/null | zstd -q -c > "$1")
 }
 
@@ -80,6 +80,7 @@ tree_files() {
   echo "libc" > "$1/usr/lib64/libc.so.6"
   echo "sh" > "$1/usr/bin/sh"
   echo "udev.conf" > "$1/usr/etc/udev.conf"
+  echo "IMAGE_VERSION=$2" > "$1/usr/lib/os-release"
   echo "udevadm" > "$1/usr/bin/udevadm"
   ln -s ../../bin/udevadm "$1/usr/lib/systemd/systemd-udevd"
 }

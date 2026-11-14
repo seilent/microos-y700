@@ -314,7 +314,7 @@ bootset() {
         [[ ! -e $f ]] || find -L "$f" -type f ! -name initramfs.img
       done
       sed 's,^\./,,; s,^etc/,usr/etc/,' <<< "$m" | grep '^usr/' || true
-    } | LC_ALL=C sort -u | while IFS= read -r f; do
+    } | LC_ALL=C sort -u | grep -vxE 'usr/(lib|etc)/os-release' | while IFS= read -r f; do
       [[ ! -f $f ]] || printf '%s\0' "$f"
     done | xargs -0r sha256sum
   )
