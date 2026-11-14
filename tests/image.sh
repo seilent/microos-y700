@@ -43,8 +43,7 @@ for p in qbootctl inputplumber steamos-manager microset mangohud lsfg-vk hexagon
 done
 
 for u in bootloader-update.service systemd-repart.service systemd-backlight@.service systemd-hibernate.service systemd-hybrid-sleep.service \
-  systemd-suspend-then-hibernate.service bootc-fetch-apply-updates.timer bootc-generic-growpart.service \
-  microos-update-check.timer; do
+  systemd-suspend-then-hibernate.service bootc-fetch-apply-updates.timer bootc-generic-growpart.service; do
   [[ $(readlink "/etc/systemd/system/$u") == /dev/null ]] || fail "$u is not masked"
 done
 [[ -z $(compgen -G '/usr/lib/repart.d/*') ]] || fail "repart.d holds definitions: $(ls /usr/lib/repart.d)"
@@ -55,7 +54,8 @@ tests=(microos-test-bootloader.service microos-test-emergency.service microos-te
 want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-update-applied.service microos-update.service \
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
-  microos-remoteproc.service microos-groups.service microos-etc-carry.service "${tests[@]}")
+  microos-remoteproc.service microos-groups.service microos-etc-carry.service microos-update-boot.path \
+  microos-update-boot.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -64,7 +64,7 @@ got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service \
-  microos-groups.service microos-etc-carry.service "${tests[@]}"; do
+  microos-groups.service microos-etc-carry.service microos-update-check.timer microos-update-boot.path "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
 for u in microos-groups.service microos-etc-carry.service; do
@@ -80,7 +80,12 @@ for u in "${tests[@]}"; do
   w=${u#microos-test-}
   systemctl cat "$u" | grep -qx "ConditionKernelCommandLine=microos.test=${w%.service}" || fail "$u has no microos.test condition"
 done
-[[ $(systemctl is-enabled microos-update-check.timer) == masked ]] || fail "microos-update-check.timer is not masked"
+[[ -L /etc/systemd/system/multi-user.target.wants/microos-update-boot.path ]] || fail "microos-update-boot.path is not wanted by multi-user.target"
+[[ $(systemctl is-enabled microos-update-boot.service) == static ]] || fail "microos-update-boot.service is not static"
+systemctl cat microos-update-check.service | grep -qx 'ExecStart=/usr/bin/microos-update --auto' || fail "microos-update-check.service does not run --auto"
+for c in zstd cpio systemd-run systemd-inhibit; do
+  command -v "$c" > /dev/null || fail "$c missing, microos-update --auto needs it"
+done
 [[ ! -e /usr/lib/systemd/user-preset/50-microos.preset ]] || fail "user 50-microos.preset in the image"
 for u in pipewire.socket pipewire-pulse.socket wireplumber.service; do
   [[ $(systemctl --global is-enabled "$u") == enabled ]] || fail "user $u is not enabled"
@@ -141,6 +146,8 @@ kept=(
   /usr/lib/systemd/system/microos-groups.service
   /usr/lib/systemd/system/microos-provision.service
   /usr/lib/systemd/system/microos-update-applied.service
+  /usr/lib/systemd/system/microos-update-boot.path
+  /usr/lib/systemd/system/microos-update-boot.service
   /usr/lib/systemd/system/microos-update-check.service
   /usr/lib/systemd/system/microos-update-check.timer
   /usr/lib/systemd/system/microos-test-bootloader.service

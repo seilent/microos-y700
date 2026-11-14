@@ -40,6 +40,5 @@ systemctl mask \
   systemd-hybrid-sleep.service \
   systemd-suspend-then-hibernate.service \
   bootc-fetch-apply-updates.timer \
-  bootc-generic-growpart.service \
-  microos-update-check.timer
+  bootc-generic-growpart.service
 systemctl --global mask mpris-proxy.service
