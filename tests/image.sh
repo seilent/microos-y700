@@ -116,6 +116,8 @@ kept=(
   /usr/lib/microos/bootimg.conf
   /usr/lib/microos/slot.conf
   /usr/lib/microos/stub.conf
+  /usr/lib/microos/stub/stub-preset-free.bin
+  /usr/lib/microos/stub/stub-preset-free.conf
   /usr/lib/microos/version
   /usr/lib/modules-load.d/microos-y700.conf
   /usr/lib/sddm/sddm.conf.d/zz-microos.conf
@@ -155,7 +157,9 @@ kept=(
   /usr/lib/udev/rules.d/91-microos-y700-bdaddr.rules
   /usr/libexec/microos/microos-bdaddr
   /usr/libexec/microos/microos-boot-ok
+  /usr/libexec/microos/microos-bootb
   /usr/libexec/microos/microos-bootimg-build
+  /usr/libexec/microos/microos-bootimg-update
   /usr/libexec/microos/microos-bootlog
   /usr/libexec/microos/microos-efi-log
   /usr/libexec/microos/microos-fail
@@ -164,6 +168,7 @@ kept=(
   /usr/libexec/microos/microos-sdam
   /usr/libexec/microos/microos-slot
   /usr/libexec/microos/microos-steam-seed
+  /usr/libexec/microos/microos-stub-pack
   /usr/libexec/microos/microos-test
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
@@ -231,7 +236,17 @@ kargs = [
   "reboot=cold",
   "cpuidle.off=1",
 ]' ]] || fail "10-microos.toml kargs"
-[[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=0\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not keep slot writes off"
+[[ $(< /usr/lib/microos/slot.conf) == $'MICROOS_SLOT_WRITE=1\nMICROOS_BOOT_TRIES=3' ]] || fail "slot.conf does not turn slot writes on"
+stub=/usr/lib/microos/stub
+[[ $(sha256sum < "$stub/stub-preset-free.conf") == $(sha256sum < /usr/lib/microos/stub.conf) ]] || fail "stub-preset-free.conf differs from stub.conf"
+payload=$(( $(sed -n 's/^MICROOS_STUB_PAYLOAD=//p' /usr/lib/microos/stub.conf) ))
+[[ $(stat -c %s "$stub/stub-preset-free.bin") == "$payload" ]] || fail "stub-preset-free.bin is not $payload bytes"
+[[ $(dd if="$stub/stub-preset-free.bin" bs=1 skip=56 count=4 status=none) == ARMd ]] || fail "stub-preset-free.bin has no arm64 Image header"
+{ head -c 16 /dev/zero; printf '\x00\x10\x00\x00\x00\x00\x00\x00'; head -c 32 /dev/zero; printf 'ARMd'; head -c 4036 /dev/zero; } > "$tmp/Image"
+/usr/libexec/microos/microos-stub-pack "$tmp/Image" "$tmp/packed" > /dev/null || fail "microos-stub-pack failed on a dummy Image"
+[[ $(stat -c %s "$tmp/packed") == $(( payload + 4096 )) ]] || fail "microos-stub-pack output size $(stat -c %s "$tmp/packed")"
+[[ $(od -An -tu8 -j16 -N8 "$tmp/packed" | tr -d ' ') == $(( payload + 4096 )) ]] || fail "microos-stub-pack image_size"
+[[ $(tail -c 4096 "$tmp/packed" | sha256sum) == $(sha256sum < "$tmp/Image") ]] || fail "microos-stub-pack payload bytes differ"
 [[ $(sha256sum < /usr/share/microos/avb/testkey_rsa4096.pem) == "6a224754880a57ab9cbd308267cd157d94cf05a1c8cb851aec4090e045d24121  -" ]] \
   || fail "AVB test key sha256"
 [[ $(< /usr/lib/systemd/journald.conf.d/10-microos.conf) == $'[Journal]\nStorage=persistent' ]] || fail "journald 10-microos.conf"
@@ -241,7 +256,7 @@ kargs = [
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad microos-remoteproc; do
+for f in microos-slot microos-usb-console microos-vpad microos-remoteproc microos-bootimg-update microos-stub-pack; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad
@@ -491,11 +506,22 @@ for u in emergency dracut-emergency; do
 done
 rm -rf "${unpack:?}"
 grep -qE "/nvmem_qcom-spmi-sdam\.ko" <<< "$list" || fail "initramfs lacks nvmem_qcom-spmi-sdam"
+for f in usr/libexec/microos/microos-bootb usr/lib/microos/slot.conf usr/bin/sha256sum usr/bin/stat usr/bin/readlink "usr/s?bin/blockdev"; do
+  grep -qE " $f( |$)" <<< "$list" || fail "initramfs lacks $f"
+done
+unpack=$(mktemp -d)
+d='usr/lib/systemd/system/dev-disk-by?x2dpartlabel'
+(cd "$unpack" && lsinitrd --unpack "$img" "$d-microos_efi.device.d/10-microos.conf" "$d-boot_b.device.d/10-microos.conf" \
+  "$d-boot_a.device.d/10-microos.conf")
+for p in microos_efi boot_b boot_a; do
+  [[ $(< "$unpack/usr/lib/systemd/system/dev-disk-by\\x2dpartlabel-$p.device.d/10-microos.conf") == \
+    $'[Unit]\nJobRunningTimeoutSec=45' ]] || fail "initramfs $p device timeout"
+done
+rm -rf "${unpack:?}"
+lsinitrd -f usr/lib/systemd/system/microos-guard.service "$img" | grep -qx 'TimeoutStartSec=180' || fail "microos-guard.service timeout"
 [[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] || fail "initramfs cmdline.d/90-microos.conf"
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
   $'[Service]\nExecStart=\nExecStart=systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd' ]] || fail "initramfs switch-root drop-in"
-[[ $(lsinitrd -f 'usr/lib/systemd/system/dev-disk-by?x2dpartlabel-microos_efi.device.d/10-microos.conf' "$img") == \
-  $'[Unit]\nJobRunningTimeoutSec=45' ]] || fail "initramfs microos_efi device timeout"
 [[ $(lsinitrd -f etc/microos-initrd-id "$img") =~ ^$kver\ [0-9]{8}T[0-9]{6}Z$ ]] || fail "initramfs microos-initrd-id"
 lsinitrd -f usr/lib/systemd/system/ostree-prepare-root.service "$img" | grep -qx 'ExecStart=/usr/lib/ostree/ostree-prepare-root /sysroot' \
   || fail "ostree-prepare-root.service ExecStart changed"

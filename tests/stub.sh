@@ -4,6 +4,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 pack=$here/../build/y700-stub/pack
 conf=$here/../system_files/usr/lib/microos/stub.conf
+spack=$here/../system_files/usr/libexec/microos/microos-stub-pack
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT
 rc=0
@@ -74,7 +75,29 @@ cmp -s <(head -c $(( MICROOS_STUB_PAYLOAD )) "$tmp/packed") <(head -c $(( MICROO
 "$pack" "$payload" "$tmp/again" > /dev/null || fail "second pack"
 cmp -s "$tmp/packed" "$tmp/again" || fail "pack is not reproducible"
 
+"$pack" --preset-free --keep "$tmp/kp" --prefix "$tmp/prefix" > "$tmp/out" || fail "pack --prefix: $(cat "$tmp/out")"
+[[ $(stat -c %s "$tmp/prefix") == $(( MICROOS_STUB_PAYLOAD )) ]] || fail "prefix size $(stat -c %s "$tmp/prefix")"
+cmp -s "$tmp/kp/stub.bin" <(head -c "$(stat -c %s "$tmp/kp/stub.bin")" "$tmp/prefix") || fail "prefix does not start with the stub"
+[[ -z $(tail -c +$(( $(stat -c %s "$tmp/kp/stub.bin") + 1 )) "$tmp/prefix" | tr -d '\0') ]] || fail "prefix padding is not zero"
+"$spack" --prefix "$tmp/prefix" --conf "$conf" "$payload" "$tmp/py" > "$tmp/out" || fail "microos-stub-pack: $(cat "$tmp/out")"
+cmp -s "$tmp/py" "$tmp/free" || fail "microos-stub-pack differs from pack --preset-free"
+own=$tmp/own
+mkdir -p "$own/usr/libexec/microos" "$own/usr/lib/microos/stub"
+cp "$spack" "$own/usr/libexec/microos/"
+cp "$tmp/prefix" "$own/usr/lib/microos/stub/stub-preset-free.bin"
+cp "$conf" "$own/usr/lib/microos/stub/stub-preset-free.conf"
+"$own/usr/libexec/microos/microos-stub-pack" "$payload" "$tmp/own.img" > "$tmp/out" || fail "microos-stub-pack from its tree: $(cat "$tmp/out")"
+cmp -s "$tmp/own.img" "$tmp/free" || fail "microos-stub-pack from its tree differs from pack --preset-free"
+head -c 4096 "$tmp/prefix" > "$tmp/short"
+if "$spack" --prefix "$tmp/short" --conf "$conf" "$payload" "$tmp/x" 2> /dev/null; then
+  fail "microos-stub-pack took a prefix shorter than the payload offset"
+fi
 head -c 64 /dev/zero > "$tmp/bad"
+if "$spack" --prefix "$tmp/prefix" --conf "$conf" "$tmp/bad" "$tmp/x" 2> /dev/null; then
+  fail "microos-stub-pack took a payload with no arm64 header"
+fi
+[[ ! -e $tmp/x ]] || fail "microos-stub-pack wrote output for a bad input"
+
 if "$pack" "$tmp/bad" "$tmp/badout" 2> /dev/null; then
   fail "pack took a payload with no arm64 header"
 fi

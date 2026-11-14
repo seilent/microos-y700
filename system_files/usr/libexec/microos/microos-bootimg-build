@@ -4,7 +4,7 @@ set -euo pipefail
 me=microos-bootimg-build
 die() { echo "$me: $*" >&2; exit 1; }
 usage="usage: $me --root <deployment root> --kernel <vmlinuz> --initrd <img> --dtb <dtb> --options <options> --sysroot <sysroot> --out <file> [--id] [--test <case>] [--maxcpus <n>] [--slot-a] [--root-missing]"
-cases=" 1 noguard bootloader panic emergency wdhang gptdump "
+cases=" 1 once noguard bootloader panic emergency wdhang gptdump "
 
 root="" kernel="" initrd="" dtb="" options="" sysroot="" out="" idonly=0 test="" maxcpus="" slota=0 rootmissing=0
 while (( $# )); do

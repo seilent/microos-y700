@@ -65,9 +65,9 @@ if [[ -n $kround || -n $bdeploy ]]; then
   [[ $bdeploy =~ ^[0-9a-f]{64}\.[0-9]+$ ]] || die "--deployment is <checksum>.<serial> from ostree admin status, got '$bdeploy'"
   (( bootimg )) || die "--kround builds boot images only, --no-bootimg leaves nothing"
   (( ${#specs[@]} > 1 )) || specs+=("stub1 1")
-  re=' (1|noguard|bootloader|panic|emergency|wdhang|gptdump) '
+  re=' (1|once|noguard|bootloader|panic|emergency|wdhang|gptdump) '
   for s in "${specs[@]:1}"; do
-    [[ " $s " == *" stub1 "* || " $s " == *" stub7 "* ]] || die "--kround image '$s' has no stub with the fastboot preset"
+    [[ " $s " =~ \ stub[17]f?\  ]] || die "--kround image '$s' has no stub"
     [[ " $s " =~ $re ]] || die "--kround image '$s' has no test case, ttyGS0 needs microos.test"
   done
 fi
@@ -86,7 +86,7 @@ spec_name() {
 for s in "${specs[@]}"; do
   for x in $s; do
     case $x in
-      stub1|stub7|stub1f|stub7f|slota|noroot|1|noguard|bootloader|panic|emergency|wdhang|gptdump) ;;
+      stub1|stub7|stub1f|stub7f|slota|noroot|1|once|noguard|bootloader|panic|emergency|wdhang|gptdump) ;;
       *) die "unknown boot image word '$x' in '$s'" ;;
     esac
   done

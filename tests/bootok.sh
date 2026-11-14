@@ -15,11 +15,14 @@ export MICROOS_RUNDIR=$tmp/run MICROOS_STATEDIR=$tmp/state MICROOS_ESP=$tmp/esp 
 export MICROOS_BOOT_OK_CONF=$tree/usr/lib/microos/boot-ok.conf
 export MICROOS_CMDLINE=$tmp/proc-cmdline MICROOS_BOOT_B=$tmp/boot_b MICROOS_NVMEM_ROOT=$tmp/nvmem MICROOS_SDAM_TRIES=1
 export MICROOS_SDAM_LIB=$tree/usr/libexec/microos/microos-sdam MICROOS_STUB_CONF=$tree/usr/lib/microos/stub.conf
+export MICROOS_BOOTB_LIB=$tree/usr/libexec/microos/microos-bootb
 export MICROOS_DEVMEM=$tmp/mem MICROOS_DEVMEM_BASE=0xd60a0000 MICROOS_STUB_WAIT=2
 export MICROOS_SLOT_CONF=$tmp/slot.conf MICROOS_SLOT=$here/bootok/bin/microos-slot
 export MICROOS_BOOT_OK_HOLD=0 MICROOS_BOOT_OK_STEP=1 MICROOS_BOOT_OK_WAIT=2
 export MICROOS_UDC=$tmp/sys/udc MICROOS_NET=$tmp/sys/net MICROOS_DRM=$tmp/sys/drm MICROOS_INPUT=$tmp/sys/input
 export PATH=$here/bootok/bin:$PATH
+export MICROOS_UPTIME=$tmp/uptime MICROOS_DEADLINE_TIMER=$tree/usr/lib/systemd/system/microos-boot-deadline.timer
+echo "100.00 200.00" > "$MICROOS_UPTIME"
 
 c() { local s; s=$(printf '%064d' 0); echo "${s//0/$1}"; }
 P=$(c a).0
@@ -75,7 +78,8 @@ responder() {
 reset() {
   rm -rf "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$MICROOS_ESP" "$FAKE_STATE/status.json" "$FAKE_STATE/reads" \
     "$FAKE_STATE/events" "$FAKE_STATE/ostree.log" "$FAKE_STATE/lockprobe" "$FAKE_STATE/shifted" "$FAKE_STATE/shifted-pin" \
-    "$FAKE_STATE/stages" "$FAKE_STATE/system-reads" "$FAKE_STATE/slot.log" "$MICROOS_NVMEM_ROOT" "$MICROOS_DEVMEM" "$MICROOS_BOOT_B"
+    "$FAKE_STATE/stages" "$FAKE_STATE/system-reads" "$FAKE_STATE/slot.log" "$FAKE_STATE/gate.n" "$MICROOS_NVMEM_ROOT" "$MICROOS_DEVMEM" \
+    "$MICROOS_BOOT_B"
   mkdir -p "$MICROOS_RUNDIR" "$MICROOS_STATEDIR" "$MICROOS_ESP/microos" "$FAKE_STATE" "$MICROOS_NVMEM_ROOT/spmi_sdam1" "$tmp/dt/nvram@7100"
   head -c 256 /dev/zero > "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem"
   printf '\005' | put "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" 72
@@ -306,35 +310,38 @@ st "$B b"
 bootimg "root=PARTLABEL=microos rootwait microos.id=$ID loglevel=4"
 run || fail "flash boot: $(cat "$tmp/out")"
 has "flash boot of $ID" || fail "flash boot not detected: $(cat "$tmp/out")"
-has "slot writes are off, boot_b not marked good" || fail "slot writes off not reported: $(cat "$tmp/out")"
-[[ -z $(slotlog) && $(attempts) == "$ID 0" && $(sdam) == 01 ]] || fail "flash boot, slot off: $(slotlog), $(attempts), $(sdam)"
+has "slot writes are off, slot b not armed" || fail "slot writes off not reported: $(cat "$tmp/out")"
+[[ $(slotlog) == "microos-slot status" && $(attempts) == "$ID 0" && $(sdam) == 01 ]] || fail "flash boot, slot off: $(slotlog), $(attempts), $(sdam)"
+has "slot status: b boot_b: active 1 priority 3 retry 5 successful 0 unbootable 0 (0x2f)" || fail "slot status not logged: $(cat "$tmp/out")"
 reset
 st "$B b"
 bootimg "root=PARTLABEL=microos microos.id=$ID"
 echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
 run || fail "flash boot with slot writes on: $(cat "$tmp/out")"
-[[ $(slotlog) == "microos-slot mark-good" ]] || fail "mark-good not run: $(slotlog)"
-has "boot_b marked good" || fail "mark-good not reported: $(cat "$tmp/out")"
+[[ $(slotlog) == $'microos-slot status\nmicroos-slot arm' ]] || fail "status then arm not run: $(slotlog)"
+[[ $(grep -n "slot status: b boot_b" "$tmp/out" | cut -d: -f1) -lt $(grep -n "slot b armed" "$tmp/out" | cut -d: -f1) ]] \
+  || fail "slot status not logged before the arm: $(cat "$tmp/out")"
+has "slot b armed, retry 7" || fail "arm not reported: $(cat "$tmp/out")"
 reset
 st "$B b"
 bootimg "root=PARTLABEL=microos microos.id=$ID"
 echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
 FAKE_SLOT_RC=1 run || fail "flash boot with a failing microos-slot: $(cat "$tmp/out")"
-has "microos-slot mark-good failed" || fail "mark-good failure not reported: $(cat "$tmp/out")"
-[[ -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "no boot-confirmed after a mark-good failure"
+has "microos-slot arm failed" || fail "arm failure not reported: $(cat "$tmp/out")"
+[[ -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "no boot-confirmed after an arm failure"
 reset
 st "$B b"
 bootimg "root=PARTLABEL=microos microos.id=$ID"
 echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
 MICROOS_SLOT=$tmp/missing run || fail "flash boot with no microos-slot: $(cat "$tmp/out")"
-has "$tmp/missing is missing, boot_b not marked good" || fail "missing microos-slot not reported: $(cat "$tmp/out")"
+has "$tmp/missing is missing, slot b not armed" || fail "missing microos-slot not reported: $(cat "$tmp/out")"
 reset
 st "$B b"
 long=$(printf 'x%.0s' {1..520})
 bootimg "root=PARTLABEL=microos $long microos.id=$ID"
 echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
 run || fail "flash boot with extra_cmdline: $(cat "$tmp/out")"
-[[ $(slotlog) == "microos-slot mark-good" ]] || fail "id in extra_cmdline not found: $(cat "$tmp/out")"
+[[ $(slotlog) == $'microos-slot status\nmicroos-slot arm' ]] || fail "id in extra_cmdline not found: $(cat "$tmp/out")"
 reset
 st "$B b"
 bootimg "root=PARTLABEL=microos microos.id=$ID" 3
@@ -364,19 +371,138 @@ wait "$resp" || true
 has "stub stopped at 9 s" || fail "stub stop not reported: $(cat "$tmp/out")"
 reset
 st "$B b"
+echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.test=1" > "$tmp/proc-cmdline"
 stub 2 7
 t0=$SECONDS
 run || fail "stub that does not stop: $(cat "$tmp/out")"
 (( SECONDS - t0 >= 2 )) || fail "stub wait shorter than MICROOS_STUB_WAIT"
 has "stub still running at 7 s after the disarm, it resets at 1200 s" || fail "running stub not reported: $(cat "$tmp/out")"
+[[ $(sdam) == 05 && -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "running stub on a test image: sdam $(sdam), not confirmed"
 reset
 st "$B b"
+echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.test=1" > "$tmp/proc-cmdline"
 stub 4 $(( 0xfffffffe ))
 run || fail "stub refused: $(cat "$tmp/out")"
 has "stub CPU_ON was refused, PSCI 4294967294" || fail "refused stub not reported: $(cat "$tmp/out")"
 [[ $(memword 0x2040) == 0 ]] || fail "disarm written for a refused stub"
+for c in "2 7 running" "4 4294967294 refused"; do
+  read -r s1 s2 res <<< "$c"
+  reset
+  st "$B b" "$P p"
+  echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
+  bootimg "root=PARTLABEL=microos microos.id=$ID"
+  echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+  stub "$s1" "$s2"
+  run_rc
+  (( r == 1 )) || fail "stub $res without microos.test: exit $r"
+  has "not confirmed: the stub is $res on an image without microos.test" || fail "stub $res without microos.test: $(cat "$tmp/out")"
+  [[ ! -e $MICROOS_RUNDIR/boot-confirmed && ! -e $MICROOS_STATEDIR/confirmed && $(attempts) == "$ID 2" && $(sdam) == 05 ]] \
+    || fail "stub $res without microos.test acted: counter $(attempts), sdam $(sdam)"
+  [[ -z $(writes) && -z $(slotlog) && $(pins) == "$P" ]] || fail "stub $res without microos.test pinned or marked: $(writes) $(slotlog)"
+done
+
+gate=$tmp/gate
+cat > "$gate" << 'EOF'
+n=$(( $(cat "$FAKE_STATE/gate.n" 2> /dev/null || echo 0) + 1 ))
+echo "$n" > "$FAKE_STATE/gate.n"
+(( n > ${FAKE_GATE_FAILS:-0} ))
+EOF
+gates() { cat "$FAKE_STATE/gate.n" 2> /dev/null || echo 0; }
+rec=$MICROOS_STATEDIR/bootimg-update
+armed() { printf 'target=%s\narmed=%s\nprev=ba9876543210\n' "$B" "$1" > "$rec"; }
 reset
 st "$B b"
+armed "$ID"
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=2 run || fail "gate passing on the third poll: $(cat "$tmp/out")"
+[[ $(gates) == 3 ]] || fail "gate polls $(gates), want 3"
+has "first boot of $ID: $gate passed" || fail "gate pass not reported: $(cat "$tmp/out")"
+[[ $(cat "$rec") == "target=$B"$'\n'"armed=$ID"$'\n'"prev=ba9876543210"$'\n'"confirmed=$ID" ]] || fail "record after the gate: $(cat "$rec")"
+[[ -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "gate pass not confirmed"
+rm -f "$MICROOS_RUNDIR/boot-confirmed"
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 run || fail "boot after confirmed=: $(cat "$tmp/out")"
+[[ $(gates) == 3 ]] || fail "gate ran after confirmed=: $(gates) polls"
+[[ $(grep -c "^confirmed=$ID$" "$rec") == 1 ]] || fail "confirmed= written twice: $(cat "$rec")"
+reset
+st "$B b" "$P p"
+echo "$P" > "$MICROOS_STATEDIR/boot-ok-pins"
+armed "$ID"
+cp "$rec" "$tmp/rec.before"
+t0=$SECONDS
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 MICROOS_BOOT_OK_GATE_WAIT=2 run_rc
+(( r == 1 )) || fail "gate timeout: exit $r"
+(( SECONDS - t0 >= 2 )) || fail "gate timeout shorter than MICROOS_BOOT_OK_GATE_WAIT"
+has "not confirmed: $gate failed for 2 s on the first boot of $ID" || fail "gate timeout message: $(cat "$tmp/out")"
+(( $(gates) >= 2 && $(gates) <= 4 )) || fail "gate timeout polls $(gates), want 2 to 4"
+[[ ! -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 2" && $(sdam) == 05 && $(memword 0x2040) == 0 ]] \
+  || fail "gate timeout acted: counter $(attempts), sdam $(sdam), disarm $(memword 0x2040)"
+[[ -z $(writes) && $(pins) == "$P" ]] || fail "gate timeout pinned: $(writes)"
+[[ $(< "$rec") == "$(< "$tmp/rec.before")" ]] || fail "gate timeout changed the record: $(cat "$rec")"
+reset
+st "$B b"
+armed "$ID"
+MICROOS_BOOT_OK_GATE=$tmp/missing MICROOS_BOOT_OK_GATE_WAIT=1 run_rc
+(( r == 1 )) || fail "missing gate script: exit $r"
+reset
+st "$B b"
+armed "$ID"
+printf 'exec sleep 100\n' > "$tmp/hang"
+t0=$SECONDS
+MICROOS_BOOT_OK_GATE=$tmp/hang MICROOS_BOOT_OK_GATE_RUN=1 MICROOS_BOOT_OK_GATE_WAIT=3 run_rc
+(( r == 1 )) || fail "hanging gate: exit $r"
+(( SECONDS - t0 >= 3 && SECONDS - t0 <= 10 )) || fail "hanging gate took $((SECONDS - t0)) s"
+has "not confirmed: $tmp/hang failed for 3 s on the first boot of $ID" || fail "hanging gate message: $(cat "$tmp/out")"
+[[ ! -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "hanging gate confirmed"
+reset
+st "$B b"
+armed "$ID"
+echo "845.50 900.00" > "$MICROOS_UPTIME"
+MICROOS_BOOT_OK_GATE=$gate run_rc
+(( r == 1 )) || fail "gate past the deadline margin: exit $r"
+has "not confirmed: no time left for $gate before the 900 s deadline" || fail "gate past the margin: $(cat "$tmp/out")"
+[[ $(gates) == 0 && ! -e $MICROOS_RUNDIR/boot-confirmed ]] || fail "gate past the margin ran or confirmed"
+reset
+st "$B b"
+armed "$ID"
+echo "801.10 900.00" > "$MICROOS_UPTIME"
+t0=$SECONDS
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 run_rc
+(( r == 1 && SECONDS - t0 <= 8 )) || fail "gate capped by the deadline: exit $r after $((SECONDS - t0)) s"
+has "not confirmed: $gate failed for 3 s on the first boot of $ID" || fail "gate cap message: $(cat "$tmp/out")"
+echo "100.00 200.00" > "$MICROOS_UPTIME"
+reset
+st "$B b"
+armed ba9876543210
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 run || fail "armed for another id: $(cat "$tmp/out")"
+[[ $(gates) == 0 ]] || fail "gate ran for another armed id"
+grep -q '^confirmed=' "$rec" && fail "confirmed= written for another armed id"
+reset
+st "$B b"
+armed "$ID"
+run || fail "armed id with no gate: $(cat "$tmp/out")"
+has "first boot of $ID, no MICROOS_BOOT_OK_GATE" || fail "no gate not reported: $(cat "$tmp/out")"
+[[ $(tail -n 1 "$rec") == "confirmed=$ID" ]] || fail "record with no gate: $(cat "$rec")"
+for c in devmem conf; do
+  reset
+  st "$B b"
+  if [[ $c == devmem ]]; then
+    env=(MICROOS_DEVMEM="$tmp/nomem")
+  else
+    env=(MICROOS_STUB_CONF="$tmp/nostub.conf")
+  fi
+  r=0
+  env "${env[@]}" "$bootok" > "$tmp/out" 2>&1 || r=$?
+  (( r == 1 )) || fail "no $c on a non test image: exit $r"
+  has "not confirmed: the stub is in an unknown state on an image without microos.test" || fail "no $c: $(cat "$tmp/out")"
+  [[ ! -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 2" && $(sdam) == 05 ]] || fail "no $c on a non test image acted"
+  reset
+  st "$B b"
+  echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.test=1" > "$tmp/proc-cmdline"
+  env "${env[@]}" "$bootok" > "$tmp/out" 2>&1 || fail "no $c on a test image: $(cat "$tmp/out")"
+done
+has "missing $tmp/nostub.conf, stub not disarmed" || fail "missing stub.conf not reported: $(cat "$tmp/out")"
+reset
+st "$B b"
+echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.test=1" > "$tmp/proc-cmdline"
 MICROOS_DEVMEM=$tmp/nomem run || fail "no devmem: $(cat "$tmp/out")"
 has "stub words not reachable through $tmp/nomem" || fail "devmem failure not reported: $(cat "$tmp/out")"
 reset
@@ -498,6 +624,39 @@ indev input4 2 "1000003" "c03 0 0 0 0 0"
 run || fail "kround p2c pass: $(cat "$tmp/out")"
 kept "kround p2c pass"
 has "kround p2c: checks udc wlan0 dsi touch pen" || fail "kround p2c checks not reported: $(cat "$tmp/out")"
+oncek() {
+  kround "$1"
+  echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.kround=$1 microos.test=${2:-once}" > "$tmp/proc-cmdline"
+  echo "not attached" > "$tmp/sys/udc/a600000.usb/state"
+}
+oncek p1a
+stub 2 7
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS="microos-usb-console.service microos-initrd-usbcon.service" run \
+  || fail "once with no USB host, console units failed: $(cat "$tmp/out")"
+kept "once with no USB host"
+has "kround p1a: checks wlan0" || fail "once checks: $(cat "$tmp/out")"
+has "microos.test=once: stub left armed" || fail "once stub not reported: $(cat "$tmp/out")"
+[[ $(memword 0x2040) == 0 && -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 0" ]] \
+  || fail "once with no USB host: disarm $(memword 0x2040), counter $(attempts)"
+[[ -z $(slotlog) ]] || fail "once RAM boot ran microos-slot: $(slotlog)"
+oncek p1a
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS=NetworkManager-wait-online.service \
+  kfail "once, wait-online failed" "failed: NetworkManager-wait-online.service after 2 s"
+oncek p1a
+rmdir "$tmp/sys/net/wlp1s0/wireless"
+kfail "once no wlan0" "kround p1a: no wireless interface after 2 s"
+oncek p1a 1
+kfail "test 1 kround with no USB host" "kround p1a: no UDC configured after 2 s"
+oncek p1a
+bootimg "root=PARTLABEL=microos microos.id=$ID microos.kround=p1a microos.test=once"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+armed "$ID"
+cp "$rec" "$tmp/rec.before"
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 run || fail "once flash boot: $(cat "$tmp/out")"
+has "flash boot of $ID" && has "microos.test=once: slot b not armed" || fail "once flash boot: $(cat "$tmp/out")"
+[[ -z $(slotlog) && $(gates) == 0 ]] || fail "once flash boot ran microos-slot or the gate: $(slotlog), gates $(gates)"
+[[ $(cat "$rec") == "$(cat "$tmp/rec.before")" ]] || fail "once flash boot changed bootimg-update: $(cat "$rec")"
+kept "once flash boot"
 for k in p1a-hang p9 p1d; do
   kround "$k"
   echo "$B" > "$MICROOS_STATEDIR/boot-ok-skip"

@@ -12,9 +12,12 @@ conf=${MICROOS_BOOT_OK_CONF:-/usr/lib/microos/boot-ok.conf}
 slotconf=${MICROOS_SLOT_CONF:-/usr/lib/microos/slot.conf}
 stubconf=${MICROOS_STUB_CONF:-/usr/lib/microos/stub.conf}
 sdamlib=${MICROOS_SDAM_LIB:-/usr/libexec/microos/microos-sdam}
+bootblib=${MICROOS_BOOTB_LIB:-/usr/libexec/microos/microos-bootb}
 slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
 cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 bootb=${MICROOS_BOOT_B:-/dev/disk/by-partlabel/boot_b}
+timer=${MICROOS_DEADLINE_TIMER:-/usr/lib/systemd/system/microos-boot-deadline.timer}
+uptime=${MICROOS_UPTIME:-/proc/uptime}
 devmem=${MICROOS_DEVMEM:-/dev/mem}
 membase=${MICROOS_DEVMEM_BASE:-0}
 lockwait=${MICROOS_BOOT_OK_LOCK_WAIT:-1800}
@@ -24,14 +27,21 @@ drmdir=${MICROOS_DRM:-/sys/class/drm}
 inputdir=${MICROOS_INPUT:-/sys/class/input}
 pins=$statedir/boot-ok-pins
 skip=$statedir/boot-ok-skip
+record=$statedir/bootimg-update
 
 [[ -r $conf ]] || die "missing $conf"
 . "$conf"
+[[ -r $bootblib ]] || die "missing $bootblib"
+. "$bootblib"
 
-kround=""
+kround="" mid="" test=""
 read -ra words < "$cmdline" || true
 for w in "${words[@]}"; do
-  [[ $w != microos.kround=* ]] || kround=${w#microos.kround=}
+  case $w in
+    microos.kround=*) kround=${w#microos.kround=} ;;
+    microos.id=*) mid=${w#microos.id=} ;;
+    microos.test=*) test=${w#microos.test=} ;;
+  esac
 done
 
 kchecks=""
@@ -46,6 +56,10 @@ if [[ -n $kround ]]; then
   for u in microos-usb-console.service NetworkManager-wait-online.service; do
     allow=${allow// $u / }
   done
+  if [[ $test == once ]]; then
+    kchecks=${kchecks/udc /}
+    allow+="microos-usb-console.service microos-initrd-usbcon.service "
+  fi
   MICROOS_BOOT_OK_ALLOW=$allow
   say "kround $kround: checks $kchecks"
 fi
@@ -170,6 +184,95 @@ while (( held < MICROOS_BOOT_OK_HOLD )); do
   health || die "not confirmed: $why after $held s of the hold"
 done
 
+first=0
+if [[ $test != once && -n $mid && -f $record ]] && grep -qxF "armed=$mid" "$record" && ! grep -qxF "confirmed=$mid" "$record"; then
+  first=1
+fi
+if (( first )) && [[ -n $MICROOS_BOOT_OK_GATE ]]; then
+  deadline=$(sed -n 's/^OnBootSec=\([0-9]\+\)$/\1/p' "$timer" 2> /dev/null | head -n 1)
+  read -r up _ < "$uptime" || up=""
+  [[ $up =~ ^[0-9]+ ]] || die "not confirmed: no uptime in $uptime for the gate"
+  left=$(( ${deadline:-900} - BASH_REMATCH - 60 - MICROOS_BOOT_OK_GATE_RUN - MICROOS_BOOT_OK_STEP - 5 ))
+  (( left > 0 )) || die "not confirmed: no time left for $MICROOS_BOOT_OK_GATE before the ${deadline:-900} s deadline"
+  wait=$(( left < MICROOS_BOOT_OK_GATE_WAIT ? left : MICROOS_BOOT_OK_GATE_WAIT ))
+  end=$(( SECONDS + wait ))
+  until timeout -k 5 "$MICROOS_BOOT_OK_GATE_RUN" bash "$MICROOS_BOOT_OK_GATE"; do
+    (( SECONDS < end )) || die "not confirmed: $MICROOS_BOOT_OK_GATE failed for $wait s on the first boot of $mid"
+    sleep "$MICROOS_BOOT_OK_STEP"
+  done
+  say "first boot of $mid: $MICROOS_BOOT_OK_GATE passed"
+elif (( first )); then
+  say "first boot of $mid, no MICROOS_BOOT_OK_GATE"
+fi
+
+disarm() {
+  python3 - "$devmem" "$membase" "$MICROOS_STUB_STATUS" "$MICROOS_STUB_DISARM" "$MICROOS_STUB_MAGIC" \
+    "$MICROOS_STUB_SIGNATURE" "$MICROOS_STUB_ARMED" "$MICROOS_STUB_RUNNING" "$MICROOS_STUB_STOPPED" \
+    "$MICROOS_STUB_REFUSED" "${MICROOS_STUB_WAIT:-5}" << 'EOF'
+import mmap
+import os
+import sys
+import time
+
+path = sys.argv[1]
+base, status, disarm, magic, sig, armed, running, stopped, refused = (int(a, 0) for a in sys.argv[2:11])
+wait = float(sys.argv[11])
+lo = (min(status, disarm) - base) // mmap.PAGESIZE * mmap.PAGESIZE
+hi = max(status, disarm) + 8 - base
+fd = os.open(path, os.O_RDWR | os.O_SYNC)
+m = mmap.mmap(fd, hi - lo, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=lo)
+w = memoryview(m).cast("I")
+
+
+def word(a):
+    return w[(a - base - lo) // 4]
+
+
+def state():
+    s = word(status)
+    return s >> 16, s & 0xFFFF, word(status + 4)
+
+
+g, st, n = state()
+if g != sig or st not in (armed, running, stopped, refused):
+    print("absent", hex(word(status)), n)
+    sys.exit(0)
+if st == refused:
+    print("refused", st, n)
+    sys.exit(0)
+if st != stopped:
+    w[(disarm - base - lo) // 4] = magic
+    end = time.monotonic() + wait
+    while st != stopped and time.monotonic() < end:
+        time.sleep(0.1)
+        g, st, n = state()
+print("stopped" if st == stopped else "running", st, n)
+EOF
+}
+
+stubdown=0 res=""
+if [[ $test == once ]]; then
+  say "microos.test=once: stub left armed, it resets the board by its deadline"
+elif [[ -r $stubconf ]]; then
+  . "$stubconf"
+  if r=$(disarm 2>&1); then
+    read -r res st n <<< "$r"
+    case $res in
+      absent) say "no stub, status word $st"; stubdown=1 ;;
+      refused) say "stub CPU_ON was refused, PSCI $n" ;;
+      stopped) say "stub stopped at $n s"; stubdown=1 ;;
+      *) say "stub still running at $n s after the disarm, it resets at $MICROOS_STUB_DEADLINE s" ;;
+    esac
+  else
+    say "stub words not reachable through $devmem: ${r##*$'\n'}"
+  fi
+else
+  say "missing $stubconf, stub not disarmed"
+fi
+if [[ -z $test && $res != stopped && $res != absent ]]; then
+  die "not confirmed: the stub is ${res:-in an unknown state} on an image without microos.test"
+fi
+
 read_status
 booted=$(id_of .booted)
 [[ $booted =~ ^[0-9a-f]{64}\.[0-9]+$ ]] || die "no booted deployment in ostree admin status"
@@ -276,14 +379,10 @@ else
     write "$pins"
   fi
 fi
-id=""
-for w in "${words[@]}"; do
-  [[ $w != microos.id=* ]] || id=${w#microos.id=}
-done
 
 flash_boot() {
-  local magic ver a="" b=""
-  if [[ -z $id ]]; then
+  local ver
+  if [[ -z $mid ]]; then
     say "no microos.id on the cmdline"
     return 1
   fi
@@ -291,99 +390,32 @@ flash_boot() {
     say "$bootb is not readable"
     return 1
   fi
-  magic=$(dd if="$bootb" bs=8 count=1 status=none 2> /dev/null | tr -d '\0') || true
-  if [[ $magic != ANDROID! ]]; then
+  if ! ver=$(bootb_version "$bootb"); then
     say "$bootb has no boot image header"
     return 1
   fi
-  ver=$(od -An -tu4 -j40 -N4 "$bootb" | tr -d ' ')
   if [[ ! $ver =~ ^[0-2]$ ]]; then
     say "$bootb header version ${ver:-unknown}, cmdline not read"
     return 1
   fi
-  IFS= read -r -d '' a < <(dd if="$bootb" bs=32 skip=2 count=16 status=none) || true
-  IFS= read -r -d '' b < <(dd if="$bootb" bs=32 skip=19 count=32 status=none) || true
-  [[ " $a$b " == *" microos.id=$id "* ]]
+  [[ " $(bootb_cmdline "$bootb") " == *" microos.id=$mid "* ]]
 }
 
 flash=0
 if flash_boot; then
   flash=1
-  say "flash boot of $id"
+  say "flash boot of $mid"
 else
-  say "RAM boot of ${id:-no microos.id}"
+  say "RAM boot of ${mid:-no microos.id}"
 fi
 
-if [[ -n $id ]]; then
+if [[ -n $mid ]]; then
   f=$esp/microos/boot-attempts
-  if mkdir -p "$esp/microos" && echo "$id 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; then
-    say "attempt counter of $id reset"
+  if mkdir -p "$esp/microos" && echo "$mid 0" > "$f.tmp" && mv -f "$f.tmp" "$f" && sync -f "$f"; then
+    say "attempt counter of $mid reset"
   else
     say "cannot reset $f"
   fi
-fi
-
-disarm() {
-  python3 - "$devmem" "$membase" "$MICROOS_STUB_STATUS" "$MICROOS_STUB_DISARM" "$MICROOS_STUB_MAGIC" \
-    "$MICROOS_STUB_SIGNATURE" "$MICROOS_STUB_ARMED" "$MICROOS_STUB_RUNNING" "$MICROOS_STUB_STOPPED" \
-    "$MICROOS_STUB_REFUSED" "${MICROOS_STUB_WAIT:-5}" << 'EOF'
-import mmap
-import os
-import sys
-import time
-
-path = sys.argv[1]
-base, status, disarm, magic, sig, armed, running, stopped, refused = (int(a, 0) for a in sys.argv[2:11])
-wait = float(sys.argv[11])
-lo = (min(status, disarm) - base) // mmap.PAGESIZE * mmap.PAGESIZE
-hi = max(status, disarm) + 8 - base
-fd = os.open(path, os.O_RDWR | os.O_SYNC)
-m = mmap.mmap(fd, hi - lo, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=lo)
-w = memoryview(m).cast("I")
-
-
-def word(a):
-    return w[(a - base - lo) // 4]
-
-
-def state():
-    s = word(status)
-    return s >> 16, s & 0xFFFF, word(status + 4)
-
-
-g, st, n = state()
-if g != sig or st not in (armed, running, stopped, refused):
-    print("absent", hex(word(status)), n)
-    sys.exit(0)
-if st == refused:
-    print("refused", st, n)
-    sys.exit(0)
-if st != stopped:
-    w[(disarm - base - lo) // 4] = magic
-    end = time.monotonic() + wait
-    while st != stopped and time.monotonic() < end:
-        time.sleep(0.1)
-        g, st, n = state()
-print("stopped" if st == stopped else "running", st, n)
-EOF
-}
-
-stubdown=0
-if [[ -r $stubconf ]]; then
-  . "$stubconf"
-  if r=$(disarm 2>&1); then
-    read -r res st n <<< "$r"
-    case $res in
-      absent) say "no stub, status word $st"; stubdown=1 ;;
-      refused) say "stub CPU_ON was refused, PSCI $n" ;;
-      stopped) say "stub stopped at $n s"; stubdown=1 ;;
-      *) say "stub still running at $n s after the disarm, it resets at $MICROOS_STUB_DEADLINE s" ;;
-    esac
-  else
-    say "stub words not reachable through $devmem: ${r##*$'\n'}"
-  fi
-else
-  say "missing $stubconf, stub not disarmed"
 fi
 
 if (( stubdown )); then
@@ -405,17 +437,32 @@ MICROOS_SLOT_WRITE=0
 if [[ -r $slotconf ]]; then
   . "$slotconf"
 fi
-if (( flash )); then
+if (( flash )) && [[ $test == once ]]; then
+  say "microos.test=once: slot b not armed"
+elif (( flash )); then
+  if [[ -x $slot ]]; then
+    if st=$("$slot" status 2>&1); then
+      while IFS= read -r l; do
+        say "slot status: $l"
+      done <<< "$st"
+    else
+      say "microos-slot status failed: ${st##*$'\n'}"
+    fi
+  fi
   if [[ $MICROOS_SLOT_WRITE != 1 ]]; then
-    say "slot writes are off, boot_b not marked good"
+    say "slot writes are off, slot b not armed"
   elif [[ ! -x $slot ]]; then
-    say "$slot is missing, boot_b not marked good"
-  elif "$slot" mark-good; then
-    say "boot_b marked good"
+    say "$slot is missing, slot b not armed"
+  elif "$slot" arm; then
+    say "slot b armed, retry 7"
   else
-    say "microos-slot mark-good failed"
+    say "microos-slot arm failed"
   fi
 fi
 
 write "$rundir/boot-confirmed" "$booted"
+if (( first )); then
+  mapfile -t lines < "$record"
+  write "$record" "${lines[@]}" "confirmed=$mid"
+fi
 echo "$me: confirmed $booted"
