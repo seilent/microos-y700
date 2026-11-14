@@ -39,6 +39,14 @@ done
 [[ -n $image && -n $channel && -n $vendor && -n $nonhlos && -n $btfm && -n $work && -n $out ]] || die "$usage"
 
 if (( ! inner )); then
+  z=$(printf '%064d' 0)
+  for c in "stub7f once|cannot read" "stub7f once noroot|cannot read" "stub1 1|cannot read" "stub7f|has no test case" \
+    "once|has no stub" "stub7f once bogus|unknown boot image word"; do
+    e=$("$repo/build/y700-install-images.sh" --image "x/y@sha256:$z" --channel t --vendor-fw /nonexistent --non-hlos /nonexistent \
+      --btfm /nonexistent --authorized-keys /nonexistent --work /nonexistent --out /nonexistent --kround p2c \
+      --deployment "$z.0" --bootimg "${c%%|*}" 2>&1) && die "--kround --bootimg '${c%%|*}' exit 0"
+    [[ $e == *"${c#*|}"* ]] || die "--kround --bootimg '${c%%|*}': $e"
+  done
   mkdir -p "$work"
   t=$(mktemp -d "$(realpath "$work")/check.XXXXXX")
   trap 'rm -rf "${t:?}"' EXIT
@@ -106,13 +114,16 @@ if [[ -n ${KROUND:-} ]]; then
     c=$(sed -n 's/^command line args: //p' <<< "$info")
     cw=" $c "
     (( ${#c} <= 440 )) || fail "$name: cmdline ${#c} bytes"
-    [[ $name == "boot-$KROUND-stub"[17]-* ]] || fail "$name: not a $KROUND stub image with the preset"
+    [[ $name =~ ^boot-$KROUND-stub[17]f?- ]] || fail "$name: not a $KROUND stub image"
     for k in "microos.kround=$KROUND" "microos.deploy=$DEPLOYMENT" "microos.id=${id:0:12}"; do
       [[ $cw == *" $k "* ]] || fail "$name: no $k in the cmdline"
     done
     [[ $cw =~ \ ostree=/ostree/boot\.[01]/default/[0-9a-f]{64}/[0-9]+\  ]] || fail "$name: ostree= is not a boot link"
     [[ $cw == *" microos.test="* ]] || fail "$name: no microos.test"
     [[ $cw == *" maxcpus="[17]" "* ]] || fail "$name: no stub maxcpus"
+    case $name in
+      *-once*) [[ $(grep -o ' microos\.test=[^ ]*' <<< "$cw" | paste -sd' ') == " microos.test=once" ]] || fail "$name: microos.test is not once alone" ;;
+    esac
     case $name in
       *-noroot*) [[ $cw == *" root=PARTLABEL=microos_missing "* ]] || fail "$name: root= not replaced" ;;
       *) [[ $cw == *" root=PARTLABEL=microos "* ]] || fail "$name: no root=PARTLABEL=microos" ;;
