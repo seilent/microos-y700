@@ -34,7 +34,7 @@ for f in usr/libexec/microos/microos-guard usr/libexec/microos/microos-initrd-lo
   grep -qE " $f( |$)" <<< "$list" || { echo "50-initramfs: $f missing" >&2; exit 1; }
 done
 grep -qE "/initrd\.target\.wants/microos-guard\.service( |$)" <<< "$list" || { echo "50-initramfs: microos-guard.service not enabled" >&2; exit 1; }
-[[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot' ]] \
+[[ $(lsinitrd -f etc/cmdline.d/90-microos.conf "$img") == 'rd.shell=0 rd.emergency=reboot rd.timeout=90' ]] \
   || { echo "50-initramfs: cmdline.d/90-microos.conf" >&2; exit 1; }
 [[ $(lsinitrd -f usr/lib/systemd/system/initrd-switch-root.service.d/10-microos.conf "$img") == \
   $'[Service]\nExecStart=\nExecStart=systemctl --no-block switch-root /sysroot /usr/lib/systemd/systemd' ]] \
