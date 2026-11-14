@@ -56,6 +56,10 @@ if [[ -n $kround ]]; then
   for u in microos-usb-console.service NetworkManager-wait-online.service; do
     allow=${allow// $u / }
   done
+  if [[ $test == once ]]; then
+    kchecks=${kchecks/udc /}
+    allow+="microos-usb-console.service microos-initrd-usbcon.service "
+  fi
   MICROOS_BOOT_OK_ALLOW=$allow
   say "kround $kround: checks $kchecks"
 fi
@@ -181,7 +185,7 @@ while (( held < MICROOS_BOOT_OK_HOLD )); do
 done
 
 first=0
-if [[ -n $mid && -f $record ]] && grep -qxF "armed=$mid" "$record" && ! grep -qxF "confirmed=$mid" "$record"; then
+if [[ $test != once && -n $mid && -f $record ]] && grep -qxF "armed=$mid" "$record" && ! grep -qxF "confirmed=$mid" "$record"; then
   first=1
 fi
 if (( first )) && [[ -n $MICROOS_BOOT_OK_GATE ]]; then
@@ -247,7 +251,9 @@ EOF
 }
 
 stubdown=0 res=""
-if [[ -r $stubconf ]]; then
+if [[ $test == once ]]; then
+  say "microos.test=once: stub left armed, it resets the board by its deadline"
+elif [[ -r $stubconf ]]; then
   . "$stubconf"
   if r=$(disarm 2>&1); then
     read -r res st n <<< "$r"
@@ -431,7 +437,9 @@ MICROOS_SLOT_WRITE=0
 if [[ -r $slotconf ]]; then
   . "$slotconf"
 fi
-if (( flash )); then
+if (( flash )) && [[ $test == once ]]; then
+  say "microos.test=once: slot b not armed"
+elif (( flash )); then
   if [[ -x $slot ]]; then
     if st=$("$slot" status 2>&1); then
       while IFS= read -r l; do

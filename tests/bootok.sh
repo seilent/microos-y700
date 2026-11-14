@@ -603,6 +603,39 @@ indev input3 2 "660800000000003" "400 0 0 0 0 0"
 indev input4 2 "1000003" "c03 0 0 0 0 0"
 run || fail "kround p1c pass: $(cat "$tmp/out")"
 kept "kround p1c pass"
+oncek() {
+  kround "$1"
+  echo "root=PARTLABEL=microos rootwait ro init=/init microos.id=$ID microos.kround=$1 microos.test=${2:-once}" > "$tmp/proc-cmdline"
+  echo "not attached" > "$tmp/sys/udc/a600000.usb/state"
+}
+oncek p1a
+stub 2 7
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS="microos-usb-console.service microos-initrd-usbcon.service" run \
+  || fail "once with no USB host, console units failed: $(cat "$tmp/out")"
+kept "once with no USB host"
+has "kround p1a: checks wlan0" || fail "once checks: $(cat "$tmp/out")"
+has "microos.test=once: stub left armed" || fail "once stub not reported: $(cat "$tmp/out")"
+[[ $(memword 0x2040) == 0 && -e $MICROOS_RUNDIR/boot-confirmed && $(attempts) == "$ID 0" ]] \
+  || fail "once with no USB host: disarm $(memword 0x2040), counter $(attempts)"
+[[ -z $(slotlog) ]] || fail "once RAM boot ran microos-slot: $(slotlog)"
+oncek p1a
+FAKE_SYSTEM=degraded FAKE_FAILED_UNITS=NetworkManager-wait-online.service \
+  kfail "once, wait-online failed" "failed: NetworkManager-wait-online.service after 2 s"
+oncek p1a
+rmdir "$tmp/sys/net/wlp1s0/wireless"
+kfail "once no wlan0" "kround p1a: no wireless interface after 2 s"
+oncek p1a 1
+kfail "test 1 kround with no USB host" "kround p1a: no UDC configured after 2 s"
+oncek p1a
+bootimg "root=PARTLABEL=microos microos.id=$ID microos.kround=p1a microos.test=once"
+echo MICROOS_SLOT_WRITE=1 > "$MICROOS_SLOT_CONF"
+armed "$ID"
+cp "$rec" "$tmp/rec.before"
+MICROOS_BOOT_OK_GATE=$gate FAKE_GATE_FAILS=99 run || fail "once flash boot: $(cat "$tmp/out")"
+has "flash boot of $ID" && has "microos.test=once: slot b not armed" || fail "once flash boot: $(cat "$tmp/out")"
+[[ -z $(slotlog) && $(gates) == 0 ]] || fail "once flash boot ran microos-slot or the gate: $(slotlog), gates $(gates)"
+[[ $(cat "$rec") == "$(cat "$tmp/rec.before")" ]] || fail "once flash boot changed bootimg-update: $(cat "$rec")"
+kept "once flash boot"
 for k in p1a-hang p9 p1d; do
   kround "$k"
   echo "$B" > "$MICROOS_STATEDIR/boot-ok-skip"
