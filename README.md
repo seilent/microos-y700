@@ -4,8 +4,15 @@ A bootc image for the Lenovo Legion Y700 (2025, TB321FU), built on Fedora (`regi
 
 It boots from slot b, next to the stock Android on slot a. Session: Steam game mode.
 
-CI builds the `testing` channel, `ghcr.io/seilent/microos-y700:testing`, from `main`, and
-`ghcr.io/seilent/microos-y700:dev-<sha>` from other branches.
+CI builds the `testing` channel, `ghcr.io/seilent/microos-y700:testing`, from `main`,
+`ghcr.io/seilent/microos-y700:dev-<sha>` from other branches, and moves `branch-<name>` to each green branch head.
+
+## Updates
+
+The device checks its channel daily and after each boot, pulls the update and writes it to `boot_b`. The next reboot
+applies it. Updates that change the kernel, the initramfs or the boot image wait for `sudo microos-update`.
+
+The channel is `/var/lib/microos/update-channel`: `testing` (the default), `stable` or `branch-<name>`.
 
 ## License
 
