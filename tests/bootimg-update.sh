@@ -332,13 +332,39 @@ st "$A b" "$N s"
 mv "$ent/ostree-1-default.conf" "$FAKE_STATE/staged.conf"
 run --deployment "$N" || fail "staged N: $(cat "$tmp/out")"
 grep -qx "ostree admin finalize-staged" "$FAKE_STATE/ostree.log" || fail "finalize-staged not run"
+[[ $(grep -E "lock-finalization|finalize-staged" "$FAKE_STATE/ostree.log") == \
+  $'ostree admin lock-finalization --unlock\nostree admin finalize-staged' ]] || fail "staged N: no unlock before the finalize"
 unpack "$new"
 [[ " $hcmd " == *" microos.deploy=$N "* ]] || fail "staged N: cmdline $hcmd"
 same "$tmp/u/ramdisk" "$sys/boot/ostree/default-$(c 2)/initramfs-$kver.img" || fail "staged N: ramdisk is not N's initrd"
 reset
 run --deployment "$A" || fail "no staged deployment: $(cat "$tmp/out")"
 ! grep -q finalize-staged "$FAKE_STATE/ostree.log" || fail "finalize-staged run with nothing staged"
+reset
+st "$A b" "$N s"
+rm "$ent/ostree-1-default.conf"
+refused "staged N without a BLS entry after the finalize" "no BLS entry" --deployment "$N"
+grep -qx "ostree admin finalize-staged" "$FAKE_STATE/ostree.log" || fail "no BLS entry: finalize-staged not run"
+same "$prev" "$runimg" || fail "no BLS entry: boot-prev.img is not the running image saved before the finalize"
+[[ $(cat "$MICROOS_ESP/microos/boot-prev.id") == "$RUN $(sha "$runimg")" ]] || fail "no BLS entry: boot-prev.id"
+reset
+mkdir -p "$MICROOS_ESP/microos"
+cp "$runimg" "$prev"
+echo "$RUN $(sha "$runimg")" > "$MICROOS_ESP/microos/boot-prev.id"
+touch -d @1000 "$prev"
+run --deployment "$A" || fail "boot-prev.img already saved: $(cat "$tmp/out")"
+grep -q "boot-prev.img already holds $RUN" "$tmp/out" || fail "boot-prev.img already saved: saved again: $(cat "$tmp/out")"
+[[ $(stat -c %Y "$prev") == 1000 ]] || fail "boot-prev.img already saved: rewritten"
+same "$MICROOS_BOOT_B" "$new" || fail "boot-prev.img already saved: boot_b is not boot-new.img"
+reset
+mkdir -p "$MICROOS_ESP/microos"
+cp "$runimg" "$prev"
+echo "$RUN $(c f)" > "$MICROOS_ESP/microos/boot-prev.id"
+run --deployment "$A" || fail "boot-prev.id with a wrong sha: $(cat "$tmp/out")"
+[[ $(cat "$MICROOS_ESP/microos/boot-prev.id") == "$RUN $(sha "$runimg")" ]] || fail "boot-prev.id with a wrong sha: not saved again"
 
+reset
+FAKE_SYSTEM=stopping refused "shutting down" "the system is shutting down, boot_b untouched" --deployment "$A"
 reset
 run --deployment "$A" --drill || fail "drill: $(cat "$tmp/out")"
 unpack "$new"

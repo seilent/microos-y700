@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+[[ $* == is-system-running ]] || exit 1
+echo "${FAKE_SYSTEM:-running}"
