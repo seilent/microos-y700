@@ -110,6 +110,10 @@ arm() {
   "$slot" arm || die "microos-slot arm failed, boot_b untouched"
 }
 
+live() {
+  [[ $(systemctl is-system-running 2> /dev/null) != stopping ]] || die "the system is shutting down, boot_b untouched"
+}
+
 if [[ $mode == restore ]]; then
   prev=$esp/microos/boot-prev.img
   bootb_prev "$esp" "" || die "no boot-prev.img with a matching sha256 in boot-prev.id"
@@ -119,6 +123,7 @@ if [[ $mode == restore ]]; then
   device
   rec=("target=$(bootb_word "$prev" microos.deploy || true)" "armed=$pid" "prev=$pid")
   [[ $pid != "$running" ]] || rec+=("confirmed=$pid")
+  live
   record "${rec[@]}"
   arm
   flash "$prev" "$psha" || die "boot-prev.img did not read back from boot_b"
@@ -142,7 +147,29 @@ tdir=$(realpath -e "$sysroot/ostree/deploy/$(stateroot "$deploy")/deploy/$deploy
   die "$stubconf differs from $tdir/usr/lib/microos/stub.conf"
 device
 
+mkdir -p "$esp/microos"
+prev=$esp/microos/boot-prev.img
+if bootb_prev "$esp" "" && [[ $bootb_prev_id == "$running" ]]; then
+  psha=$bootb_prev_sha
+  say "$prev already holds $running"
+else
+  pt=$prev.tmp
+  dd if="$dev" of="$pt" bs=1048576 count="$size" iflag=direct,count_bytes status=none || die "cannot read $dev"
+  sync "$pt"
+  psha=$(sha256sum < "$pt")
+  psha=${psha%% *}
+  [[ $(bootb_sha "$dev" "$size") == "$psha" ]] || die "boot-prev.img.tmp differs from boot_b"
+  mv -f "$pt" "$prev"
+  sync "$esp/microos"
+  echo "$running $psha" > "$esp/microos/boot-prev.id.tmp"
+  sync "$esp/microos/boot-prev.id.tmp"
+  mv -f "$esp/microos/boot-prev.id.tmp" "$esp/microos/boot-prev.id"
+  sync "$esp/microos"
+  say "boot_b ($running) saved to $prev"
+fi
+
 if jq -e 'any(.deployments[]; .staged)' <<< "$status" > /dev/null; then
+  ostree admin lock-finalization --unlock > /dev/null || die "ostree admin lock-finalization --unlock failed"
   ostree admin finalize-staged || die "ostree admin finalize-staged failed"
   read_status
   [[ -n $(stateroot "$deploy") && -n $(stateroot "$from") ]] || die "finalize-staged changed the deployment ids"
@@ -207,21 +234,6 @@ dtb=$tdir/usr/lib/modules/$kver/dtb/$dtbrel
 
 work=$(mktemp -d)
 trap 'rm -rf "${work:?}"' EXIT
-mkdir -p "$esp/microos"
-prev=$esp/microos/boot-prev.img
-pt=$prev.tmp
-dd if="$dev" of="$pt" bs=1048576 count="$size" iflag=direct,count_bytes status=none || die "cannot read $dev"
-sync "$pt"
-psha=$(sha256sum < "$pt")
-psha=${psha%% *}
-[[ $(bootb_sha "$dev" "$size") == "$psha" ]] || die "boot-prev.img.tmp differs from boot_b"
-mv -f "$pt" "$prev"
-sync "$esp/microos"
-echo "$running $psha" > "$esp/microos/boot-prev.id.tmp"
-sync "$esp/microos/boot-prev.id.tmp"
-mv -f "$esp/microos/boot-prev.id.tmp" "$esp/microos/boot-prev.id"
-sync "$esp/microos"
-say "boot_b ($running) saved to $prev"
 
 "$t/usr/libexec/microos/microos-stub-pack" "$kernel" "$work/kernel" >&2 || die "microos-stub-pack failed"
 args=(--maxcpus 7)
@@ -245,6 +257,7 @@ sync "$esp/microos"
 nsha=$(sha256sum < "$new")
 nsha=${nsha%% *}
 
+live
 record "target=$deploy" "armed=$nid" "prev=$running"
 arm
 if ! flash "$new" "$nsha"; then
