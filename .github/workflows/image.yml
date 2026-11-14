@@ -151,6 +151,10 @@ jobs:
             push_tag=dev-$short
             final_tag=dev-$short
             channel=false
+            branch=branch-$GITHUB_REF_NAME
+            if [[ $GITHUB_REF == refs/heads/* && ${#branch} -le 128 && $branch =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+              final_tag=$branch
+            fi
           fi
           {
             echo "short=$short"
@@ -485,7 +489,7 @@ jobs:
 
   publish:
     needs: [image, source]
-    if: needs.image.outputs.channel == 'true'
+    if: needs.image.outputs.final_tag != needs.image.outputs.push_tag
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -512,9 +516,9 @@ jobs:
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY" refs/heads/main | cut -f1)
+          head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY" "refs/heads/$GITHUB_REF_NAME" | cut -f1)
           if [[ $head != "$GITHUB_SHA" ]]; then
-            echo "::notice::main is at $head, not $GITHUB_SHA; $IMAGE:$TAG stays"
+            echo "::notice::$GITHUB_REF_NAME is at $head, not $GITHUB_SHA; $IMAGE:$TAG stays"
             exit 0
           fi
           label() { skopeo inspect --no-creds --format '{{index .Labels "org.opencontainers.image.version"}}' "$1"; }
