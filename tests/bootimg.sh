@@ -170,7 +170,7 @@ id2=$(bake --out "$out/again.img")
 [[ $id2 == "${ids[production]}" ]] || fail "id not stable"
 same "$out/production.img" "$out/again.img" || fail "two bakes differ"
 rm -f "$out/again.img"
-for w in 1 noguard bootloader panic emergency wdhang gptdump; do
+for w in 1 once noguard bootloader panic emergency wdhang gptdump; do
   variant "test-$w" --test "$w" -- "microos.test=$w" root=PARTLABEL=microos
 done
 variant stub1 --kernel "$stub" --test 1 --maxcpus 1 -- microos.test=1 maxcpus=1 cpuidle.off=1
