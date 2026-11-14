@@ -590,6 +590,7 @@ touch "$state/update-pause"
 t --auto
 want 3
 has "paused, $state/update-pause exists"
+is state "$run/update-available" paused
 not_called skopeo .
 rm "$state/update-pause"
 for w in microos.test=1 microos.kround=p1c; do
