@@ -140,6 +140,7 @@ kept=(
   /usr/lib/sysctl.d/60-microos-yama.conf
   /usr/lib/systemd/journald.conf.d/10-microos.conf
   /usr/lib/systemd/logind.conf.d/50-microos.conf
+  /usr/lib/systemd/sleep.conf.d/50-microos.conf
   /usr/lib/systemd/system-preset/50-microos.preset
   /usr/lib/systemd/system-preset/60-microos-steam.preset
   /usr/lib/systemd/system/emergency.service.d/10-microos.conf
@@ -350,6 +351,10 @@ compgen -G "/usr/lib/modules/$kver/kernel/drivers/hid/hid-steam.ko*" >/dev/null 
   'SUBSYSTEM=="tty", KERNEL=="ttyGS0", ENV{SYSTEMD_WANTS}+="serial-getty@ttyGS0.service"' ]] || fail "90-microos-usb-console.rules"
 [[ $(< /usr/lib/tmpfiles.d/microos.conf) == $'d /run/microos 0755 root root -\nd /var/home/micro 0700 micro micro -\nd /var/lib/microos 0755 root root -\nd /var/cache/libX11 0755 root root -\nd /var/cache/libX11/compose 0755 root root -' ]] \
   || fail "tmpfiles microos.conf"
+[[ $(< /usr/lib/systemd/sleep.conf.d/50-microos.conf) == $'[Sleep]\nAllowHibernation=no\nAllowSuspendThenHibernate=no\nAllowHybridSleep=no\nMemorySleepMode=s2idle' ]] \
+  || fail "sleep.conf.d 50-microos.conf"
+last=$(systemd-analyze cat-config systemd/sleep.conf | awk -F= '/^MemorySleepMode=/ { v = $2 } END { print v }')
+[[ $last == s2idle ]] || fail "effective MemorySleepMode is $last"
 dtb=/usr/lib/modules/$kver/dtb/$(sed -n 's/^MICROOS_DTB=//p' /usr/lib/microos/bootimg.conf)
 [[ $(od -An -tx1 -N4 "$dtb" | tr -d ' \n') == d00dfeed ]] || fail "MICROOS_DTB $dtb is not a DTB"
 
