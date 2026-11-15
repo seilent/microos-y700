@@ -15,7 +15,7 @@ export MICROOS_RUNDIR=$tmp/run MICROOS_STATEDIR=$tmp/state MICROOS_ESP=$tmp/esp 
 export MICROOS_BOOT_OK_CONF=$tree/usr/lib/microos/boot-ok.conf
 export MICROOS_CMDLINE=$tmp/proc-cmdline MICROOS_BOOT_B=$tmp/boot_b MICROOS_NVMEM_ROOT=$tmp/nvmem MICROOS_SDAM_TRIES=1
 export MICROOS_SDAM_LIB=$tree/usr/libexec/microos/microos-sdam MICROOS_STUB_CONF=$tree/usr/lib/microos/stub.conf
-export MICROOS_BOOTB_LIB=$tree/usr/libexec/microos/microos-bootb
+export MICROOS_BOOTB_LIB=$tree/usr/libexec/microos/microos-bootb MICROOS_STUB_LIB=$tree/usr/libexec/microos/microos-stub
 export MICROOS_DEVMEM=$tmp/mem MICROOS_DEVMEM_BASE=0xd60a0000 MICROOS_STUB_WAIT=2
 export MICROOS_SLOT_CONF=$tmp/slot.conf MICROOS_SLOT=$here/bootok/bin/microos-slot
 export MICROOS_BOOT_OK_HOLD=0 MICROOS_BOOT_OK_STEP=1 MICROOS_BOOT_OK_WAIT=2

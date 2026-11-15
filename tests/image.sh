@@ -187,6 +187,7 @@ kept=(
   /usr/libexec/microos/microos-sdam
   /usr/libexec/microos/microos-slot
   /usr/libexec/microos/microos-steam-seed
+  /usr/libexec/microos/microos-stub
   /usr/libexec/microos/microos-stub-pack
   /usr/libexec/microos/microos-test
   /usr/libexec/microos/microos-update-applied

@@ -13,13 +13,13 @@ slotconf=${MICROOS_SLOT_CONF:-/usr/lib/microos/slot.conf}
 stubconf=${MICROOS_STUB_CONF:-/usr/lib/microos/stub.conf}
 sdamlib=${MICROOS_SDAM_LIB:-/usr/libexec/microos/microos-sdam}
 bootblib=${MICROOS_BOOTB_LIB:-/usr/libexec/microos/microos-bootb}
+stublib=${MICROOS_STUB_LIB:-/usr/libexec/microos/microos-stub}
 slot=${MICROOS_SLOT:-/usr/libexec/microos/microos-slot}
 cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 bootb=${MICROOS_BOOT_B:-/dev/disk/by-partlabel/boot_b}
 timer=${MICROOS_DEADLINE_TIMER:-/usr/lib/systemd/system/microos-boot-deadline.timer}
 uptime=${MICROOS_UPTIME:-/proc/uptime}
 devmem=${MICROOS_DEVMEM:-/dev/mem}
-membase=${MICROOS_DEVMEM_BASE:-0}
 lockwait=${MICROOS_BOOT_OK_LOCK_WAIT:-1800}
 udcdir=${MICROOS_UDC:-/sys/class/udc}
 netdir=${MICROOS_NET:-/sys/class/net}
@@ -33,6 +33,8 @@ record=$statedir/bootimg-update
 . "$conf"
 [[ -r $bootblib ]] || die "missing $bootblib"
 . "$bootblib"
+[[ -r $stublib ]] || die "missing $stublib"
+. "$stublib"
 
 kround="" mid="" test=""
 read -ra words < "$cmdline" || true
@@ -205,57 +207,12 @@ elif (( first )); then
   say "first boot of $mid, no MICROOS_BOOT_OK_GATE"
 fi
 
-disarm() {
-  python3 - "$devmem" "$membase" "$MICROOS_STUB_STATUS" "$MICROOS_STUB_DISARM" "$MICROOS_STUB_MAGIC" \
-    "$MICROOS_STUB_SIGNATURE" "$MICROOS_STUB_ARMED" "$MICROOS_STUB_RUNNING" "$MICROOS_STUB_STOPPED" \
-    "$MICROOS_STUB_REFUSED" "${MICROOS_STUB_WAIT:-5}" << 'EOF'
-import mmap
-import os
-import sys
-import time
-
-path = sys.argv[1]
-base, status, disarm, magic, sig, armed, running, stopped, refused = (int(a, 0) for a in sys.argv[2:11])
-wait = float(sys.argv[11])
-lo = (min(status, disarm) - base) // mmap.PAGESIZE * mmap.PAGESIZE
-hi = max(status, disarm) + 8 - base
-fd = os.open(path, os.O_RDWR | os.O_SYNC)
-m = mmap.mmap(fd, hi - lo, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=lo)
-w = memoryview(m).cast("I")
-
-
-def word(a):
-    return w[(a - base - lo) // 4]
-
-
-def state():
-    s = word(status)
-    return s >> 16, s & 0xFFFF, word(status + 4)
-
-
-g, st, n = state()
-if g != sig or st not in (armed, running, stopped, refused):
-    print("absent", hex(word(status)), n)
-    sys.exit(0)
-if st == refused:
-    print("refused", st, n)
-    sys.exit(0)
-if st != stopped:
-    w[(disarm - base - lo) // 4] = magic
-    end = time.monotonic() + wait
-    while st != stopped and time.monotonic() < end:
-        time.sleep(0.1)
-        g, st, n = state()
-print("stopped" if st == stopped else "running", st, n)
-EOF
-}
-
 stubdown=0 res=""
 if [[ $test == once ]]; then
   say "microos.test=once: stub left armed, it resets the board by its deadline"
 elif [[ -r $stubconf ]]; then
   . "$stubconf"
-  if r=$(disarm 2>&1); then
+  if r=$(stub_disarm 2>&1); then
     read -r res st n <<< "$r"
     case $res in
       absent) say "no stub, status word $st"; stubdown=1 ;;
