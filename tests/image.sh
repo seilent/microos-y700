@@ -283,13 +283,13 @@ vpad=/usr/libexec/microos/microos-vpad
 python3 -c 'import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
   "$vpad" "$tmp/vpad.pyc" || fail "microos-vpad does not compile"
 [[ $(grep -E '^\s*(import|from) ' "$vpad" | LC_ALL=C sort | paste -sd' ') == \
-  'import fcntl import math import os import select import signal import struct import sys import time' ]] || fail "microos-vpad imports"
+  'import fcntl import math import os import pwd import select import signal import socket import struct import sys import time' ]] || fail "microos-vpad imports"
 ! grep -q ctypes "$vpad" || fail "microos-vpad uses ctypes"
 vp() { MICROOS_VPAD_DRYRUN=$1 "$vpad" "${@:2}"; }
 evioc() { echo $(( ($1 << 30) | ($3 << 16) | (0x45 << 8) | $2 )); }
 desc=06ffff0901a10109020903150026ff00750895408102090609071500
 desc+=26ff0075089540b102c0
-[[ $(vp 1) == "$((4 + 128 + 64 + 64 + 2 + 2 + 4 * 4 + 4096)) $(evioc 1 0x80 48) $(evioc 1 0x90 4) $(evioc 2 0x18 96) 48 24 $desc" ]] \
+[[ $(vp 1) == "$((4 + 128 + 64 + 64 + 2 + 2 + 4 * 4 + 4096)) $(evioc 1 0x80 48) $(evioc 1 0x90 4) $(evioc 2 0x18 96) $(evioc 1 0xa0 4) 48 24 $desc" ]] \
   || fail "microos-vpad event sizes, ioctl numbers or descriptor: $(vp 1)"
 c=$(vp uhid create)
 [[ ${c:0:8} == 0b000000 && ${c:520:4} == 2600 && ${c:524:4} == 0300 && ${c:528:8} == de280000 && ${c:536:8} == 05120000 \
@@ -313,7 +313,8 @@ done
 [[ $(vp haptic ea0402010000) == $'left 12 40960\nright 12 40960' && $(vp haptic ea0402010400) == $'left 24 40960\nright 24 40960' \
   && $(vp haptic ea0402020100) == $'left 13 40960\nright 13 40960' && $(vp haptic ea0400000000) == 'left 0 0' \
   && -z $(vp haptic eb09000000000000000000 ec0a0000000000000000) ]] || fail "microos-vpad 0xea, 0xeb or 0xec"
-[[ $(vp keys '0:1 80:0') == 'single 380' && $(vp keys '0:1 80:0 200:1 260:0') == 'double 200' && -z $(vp keys '0:1 700:0') ]] \
+[[ $(vp keys '0:1 80:0') == $'down 0 0\nsingle 380 0' && $(vp keys '0:1 80:0 200:1 260:0') == $'down 0 0\ndown 200 200\ndouble 200 200' \
+  && $(vp keys '0:1 700:0') == 'down 0 0' && $(vp keys '0:1 1500:0') == $'down 0 0\nhold 1000 0' ]] \
   || fail "microos-vpad power key taps"
 off=$'save 1200\nbl 0'
 for t in "single|$off"$'\ngrab' "single bl=800 single|$off"$'\ngrab\nbl 0\nbl 1200\nungrab' \
@@ -328,7 +329,7 @@ unit=/usr/lib/systemd/system/microos-vpad.service
 for l in 'DeviceAllow=/dev/uhid rw' 'DeviceAllow=char-input rw' 'ReadWritePaths=-/sys/class/backlight/ktz8866-backlight/' \
   'StartLimitIntervalSec=0' 'RuntimeDirectory=microos-vpad' 'RuntimeDirectoryPreserve=yes' \
   'ExecStopPost=/usr/libexec/microos/microos-vpad restore' 'MemoryDenyWriteExecute=yes' 'CapabilityBoundingSet=' \
-  'RestrictAddressFamilies=none'; do
+  'RestrictAddressFamilies=AF_UNIX'; do
   grep -qxF "$l" "$unit" || fail "microos-vpad.service lacks $l"
 done
 ! grep -q uinput "$unit" || fail "microos-vpad.service still allows uinput"

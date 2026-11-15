@@ -2,8 +2,10 @@
 import fcntl
 import math
 import os
+import pwd
 import select
 import signal
+import socket
 import struct
 import sys
 import time
@@ -29,6 +31,7 @@ def ioc(direction, nr, size):
 EVIOCSFF = ioc(1, 0x80, 48)
 EVIOCGRAB = ioc(1, 0x90, 4)
 EVIOCGKEY = ioc(2, 0x18, 96)
+EVIOCSCLOCKID = ioc(1, 0xA0, 4)
 EV_KEY = 0x01
 EV_FF = 0x15
 FF_RUMBLE = 0x50
@@ -45,6 +48,9 @@ POWER = "pmic_pwrkey"
 SCREEN_INPUTS = ("Novatek NT36523 Touchscreen", "Novatek NT36523 Pen")
 BACKLIGHT = "/sys/class/backlight/ktz8866-backlight/brightness"
 SAVED = "/run/microos-vpad/brightness"
+SOCKET = os.environ.get("MICROOS_VPAD_SOCKET", "/run/microos-vpad/power")
+HELPER = os.environ.get("MICROOS_VPAD_HELPER", "micro")
+HELPER_UNIT = os.environ.get("MICROOS_VPAD_HELPER_UNIT", "microos-powerkey.service")
 DEFAULT_BRIGHTNESS = 512
 
 BASE = 0xA000
@@ -55,6 +61,7 @@ MAX_MS = 200
 INTENSITY = {0: 1.0, 1: 0.5, 2: 1.0, 3: 1.5, 4: 2.0}
 REPORT_MS = REPORT_US / 1000
 TAP_MS = 300
+HOLD_MS = 1000
 QAM_MS = 100
 GRAB_POLL_MS = 50
 GRAB_WAIT_MS = 2000
@@ -68,7 +75,7 @@ def log(text):
 
 
 def ms():
-    return time.monotonic() * 1000
+    return time.clock_gettime(time.CLOCK_BOOTTIME) * 1000
 
 
 def message(data):
@@ -175,30 +182,41 @@ class Taps:
         self.emit = emit
         self.down = None
         self.released = None
+        self.first = None
+        self.hold_at = None
         self.second = False
 
     def deadline(self):
-        return math.inf if self.released is None else self.released + TAP_MS
+        tap = math.inf if self.released is None else self.released + TAP_MS
+        return min(tap, math.inf if self.hold_at is None else self.hold_at)
 
     def expire(self, now):
         if self.released is not None and now - self.released >= TAP_MS:
             at = self.released + TAP_MS
             self.released = None
-            self.emit("single", at)
+            self.emit("single", at, self.first)
+        if self.hold_at is not None and now >= self.hold_at:
+            at = self.hold_at
+            self.hold_at = None
+            self.emit("hold", at, self.down)
 
     def key(self, value, now):
         self.expire(now)
         if value == 1 and self.down is None:
             self.down = now
             self.second = self.released is not None
+            self.hold_at = None if self.second else now + HOLD_MS
+            self.emit("down", now, now)
             if self.second:
                 self.released = None
-                self.emit("double", now)
+                self.emit("double", now, now)
         elif value == 0 and self.down is not None:
             held = now - self.down
-            self.down = None
             if not self.second and held <= TAP_MS:
                 self.released = now
+                self.first = self.down
+            self.down = None
+            self.hold_at = None
 
 
 def restore_value(level, saved):
@@ -379,17 +397,151 @@ class DryScreen(Screen):
             print(word)
 
 
+class Power:
+    def __init__(self, screen, qam, send):
+        self.screen = screen
+        self.qam = qam
+        self.send = send
+
+    def state(self):
+        return "state off" if self.screen.off else "state on"
+
+    def gesture(self, kind, at, down):
+        if self.send(f"{kind} {down / 1000:.6f} {'off' if self.screen.off else 'on'}"):
+            if kind == "double" and not self.screen.off:
+                self.qam(at)
+            return
+        if kind in ("single", "double"):
+            self.screen.tap(kind, at)
+
+    def command(self, word, now):
+        if word == "blank":
+            if self.screen.off:
+                self.screen.recheck()
+            else:
+                self.screen.sleep(now)
+        elif word == "restore":
+            if self.screen.off:
+                self.screen.wake()
+        else:
+            log(f"power key helper: unknown word {word!r}")
+            return
+        self.send(self.state())
+
+
+def cgroup(pid):
+    try:
+        with open(f"/proc/{pid}/cgroup") as f:
+            for line in f:
+                if line.startswith("0::"):
+                    return line[3:].strip()
+    except OSError:
+        pass
+    return ""
+
+
+class Link:
+    def __init__(self, poller):
+        self.poller = poller
+        self.server = None
+        self.client = None
+        self.refused = set()
+
+    def listen(self):
+        try:
+            os.unlink(SOCKET)
+        except FileNotFoundError:
+            pass
+        except OSError as err:
+            log(f"{SOCKET}: {err.strerror}, no power key helper")
+            return
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET | socket.SOCK_NONBLOCK | socket.SOCK_CLOEXEC)
+        try:
+            server.bind(SOCKET)
+            os.chmod(SOCKET, 0o666)
+            server.listen(1)
+        except OSError as err:
+            server.close()
+            log(f"{SOCKET}: {err.strerror}, no power key helper")
+            return
+        self.server = server
+        self.poller.register(server, select.POLLIN)
+
+    def ready(self, fd, power, now):
+        if self.server is not None and fd == self.server.fileno():
+            self.accept(power)
+        elif self.client is not None and fd == self.client.fileno():
+            self.receive(power, now)
+
+    def accept(self, power):
+        try:
+            conn, _ = self.server.accept()
+        except OSError:
+            return
+        pid, uid, _ = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        try:
+            want = pwd.getpwnam(HELPER).pw_uid
+        except KeyError:
+            want = None
+        group = cgroup(pid)
+        if uid != want or not group.endswith("/" + HELPER_UNIT):
+            if (uid, group) not in self.refused:
+                self.refused.add((uid, group))
+                log(f"power key helper: uid {uid} in {group or 'no cgroup'} refused")
+            conn.close()
+            return
+        self.drop()
+        conn.setblocking(False)
+        self.client = conn
+        self.poller.register(conn, select.POLLIN)
+        log("power key helper connected")
+        self.send(power.state())
+
+    def receive(self, power, now):
+        try:
+            data = self.client.recv(64)
+        except BlockingIOError:
+            return
+        except OSError:
+            data = b""
+        if not data:
+            log("power key helper gone")
+            self.drop()
+            return
+        power.command(data.decode(errors="replace").strip(), now)
+
+    def send(self, text):
+        if self.client is None:
+            return False
+        try:
+            self.client.send(text.encode())
+        except OSError:
+            log("power key helper gone")
+            self.drop()
+            return False
+        return True
+
+    def drop(self):
+        if self.client is not None:
+            self.poller.unregister(self.client)
+            self.client.close()
+            self.client = None
+
+
 class Daemon:
     def __init__(self, uhid):
         self.uhid = uhid
         self.poller = select.poll()
         self.poller.register(uhid, select.POLLIN)
         self.power = None
+        self.clock = False
         self.motors = {}
         self.noted = set()
         self.pad = Pad()
-        self.taps = Taps(self.tapped)
         self.screen = Screen(self.qam)
+        self.link = Link(self.poller)
+        self.keys = Power(self.screen, self.qam, self.link.send)
+        self.taps = Taps(self.keys.gesture)
         self.qam_until = 0
         self.scan_at = 0
         self.stop = False
@@ -405,9 +557,6 @@ class Daemon:
     def qam(self, now):
         self.qam_until = now + QAM_MS
 
-    def tapped(self, kind, at):
-        self.screen.tap(kind, at)
-
     def scan(self, now):
         found = scan()
         if self.power is None and POWER in found:
@@ -422,6 +571,12 @@ class Daemon:
                     os.close(fd)
                     self.note(f"{POWER}: grab: {err.strerror}")
                 else:
+                    try:
+                        fcntl.ioctl(fd, EVIOCSCLOCKID, struct.pack("i", time.CLOCK_BOOTTIME))
+                        self.clock = True
+                    except OSError as err:
+                        self.clock = False
+                        self.note(f"{POWER}: clock: {err.strerror}, key times taken on read")
                     self.power = fd
                     self.poller.register(fd, select.POLLIN)
         for side, name in MOTORS.items():
@@ -492,9 +647,9 @@ class Daemon:
             return
         now = ms()
         for at in range(0, len(data) - 23, 24):
-            kind, code, value = struct.unpack_from("<HHi", data, at + 16)
+            sec, usec, kind, code, value = struct.unpack_from("<qqHHi", data, at)
             if kind == EV_KEY and code == KEY_POWER and value in (0, 1):
-                self.taps.key(value, now)
+                self.taps.key(value, sec * 1000 + usec / 1000 if self.clock else now)
 
     def send(self, now):
         self.seq = (self.seq + 1) & 0xFFFFFFFF
@@ -505,6 +660,7 @@ class Daemon:
     def run(self):
         signal.signal(signal.SIGTERM, lambda *_: setattr(self, "stop", True))
         os.write(self.uhid, create_event())
+        self.link.listen()
         report_at = grab_at = check_at = ms()
         while not self.stop:
             now = ms()
@@ -531,6 +687,8 @@ class Daemon:
                     self.uhid_events()
                 elif fd == self.power:
                     self.power_events()
+                else:
+                    self.link.ready(fd, self.keys, ms())
         if self.screen.off:
             self.screen.wake()
         os.close(self.uhid)
@@ -552,7 +710,7 @@ def restore():
 
 def dryrun(mode, args):
     if mode == "1":
-        print(EVENT_SIZE, EVIOCSFF, EVIOCGRAB, EVIOCGKEY, len(effect(-1, 0, 0)), len(input_event(0, 0, 0)), DESC.hex())
+        print(EVENT_SIZE, EVIOCSFF, EVIOCGRAB, EVIOCGKEY, EVIOCSCLOCKID, len(effect(-1, 0, 0)), len(input_event(0, 0, 0)), DESC.hex())
     elif mode == "uhid":
         pad = Pad()
         for arg in args:
@@ -572,11 +730,63 @@ def dryrun(mode, args):
             for side, length, strong in pulses(message(bytes.fromhex(arg))):
                 print(side, length, strong)
     elif mode == "keys":
-        taps = Taps(lambda kind, at: print(kind, at))
+        taps = Taps(lambda kind, at, down: print(kind, at, down))
         for item in " ".join(args).split():
             at, value = item.split(":")
             taps.key(int(value), int(at))
         taps.expire(math.inf)
+    elif mode == "power":
+        screen = DryScreen(int(args[0]))
+        helper = []
+
+        def send(text):
+            if helper:
+                print(f"send {text}")
+            return bool(helper)
+
+        power = Power(screen, screen.qam, send)
+        taps = Taps(power.gesture)
+        for item in " ".join(args[1:]).split():
+            name, _, value = item.partition("=")
+            if name == "helper":
+                helper[:] = [True] if value == "1" else []
+            elif name == "key":
+                at, down = value.split(":")
+                taps.key(int(down), int(at))
+            elif name == "at":
+                taps.expire(int(value))
+            elif name == "word":
+                power.command(value, 0)
+            elif name == "bl":
+                screen.level = int(value)
+        taps.expire(math.inf)
+    elif mode == "link":
+        sys.stdout.reconfigure(line_buffering=True)
+        poller = select.poll()
+        link = Link(poller)
+        link.listen()
+        if link.server is None:
+            return 1
+        screen = DryScreen(int(args[0]))
+        power = Power(screen, screen.qam, link.send)
+        taps = Taps(power.gesture)
+        poller.register(0, select.POLLIN)
+        print("ready")
+        pending = b""
+        while True:
+            for fd, _ in poller.poll():
+                if fd != 0:
+                    link.ready(fd, power, 0)
+                    continue
+                data = os.read(0, 4096)
+                if not data:
+                    return 0
+                *lines, pending = (pending + data).split(b"\n")
+                for words in (line.split() for line in lines):
+                    if words[0] == b"key":
+                        taps.key(int(words[2]), int(words[1]))
+                    elif words[0] == b"at":
+                        taps.expire(int(words[1]))
     elif mode == "screen":
         screen = DryScreen(int(args[0]))
         now = 0
