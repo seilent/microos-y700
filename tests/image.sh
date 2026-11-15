@@ -112,6 +112,7 @@ kept=(
   /usr/lib/bootc/kargs.d/10-microos.toml
   /usr/lib/modprobe.d/microos-y700-rtc.conf
   /usr/lib/udev/rules.d/60-microos-backlight.rules
+  /usr/lib/udev/rules.d/60-microos-y700-pcie-wakeup.rules
   /usr/lib/systemd/user-preset/60-microos-audio.preset
   /usr/share/pipewire/pipewire.conf.d/90-microos-null-sink.conf
   /usr/lib/dracut/dracut.conf.d/90-microos.conf
@@ -417,6 +418,10 @@ ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turn
 [[ $(< /usr/lib/modprobe.d/microos-y700-rtc.conf) == 'blacklist rtc_pm8xxx' ]] || fail "modprobe.d microos-y700-rtc.conf"
 [[ $(readlink /etc/systemd/system-generators/systemd-gpt-auto-generator) == /dev/null ]] || fail "systemd-gpt-auto-generator is not masked"
 udevadm verify --no-style /usr/lib/udev/rules.d/60-microos-backlight.rules >/dev/null 2>&1 || fail "60-microos-backlight.rules does not verify"
+rules=/usr/lib/udev/rules.d/60-microos-y700-pcie-wakeup.rules
+[[ $(< "$rules") == 'ACTION=="add", SUBSYSTEM=="pci", ATTR{class}=="0x060400", KERNELS=="1c00000.pcie", ATTR{power/wakeup}="disabled"' ]] \
+  || fail "60-microos-y700-pcie-wakeup.rules"
+udevadm verify --no-style "$rules" >/dev/null 2>&1 || fail "$rules does not verify"
 rules=/usr/lib/udev/rules.d/91-microos-y700-bdaddr.rules
 [[ $(< "$rules") == 'SUBSYSTEM=="bluetooth", KERNEL=="hci[0-9]*", ENV{DEVTYPE}=="host", TAG+="systemd", ENV{SYSTEMD_WANTS}+="microos-bdaddr@%k.service"' ]] \
   || fail "91-microos-y700-bdaddr.rules"
