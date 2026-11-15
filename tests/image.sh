@@ -58,7 +58,7 @@ want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-u
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
   microos-remoteproc.service microos-groups.service microos-etc-carry.service microos-update-boot.path \
-  microos-update-boot.service microos-bdaddr@.service "${tests[@]}")
+  microos-update-boot.service microos-bdaddr@.service microos-sleep-gate.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -67,7 +67,8 @@ got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 [[ $got == "$(LC_ALL=C sort <<< "$want")" ]] || fail "MicroOS units: $(tr '\n' ' ' <<< "$got")"
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service \
-  microos-groups.service microos-etc-carry.service microos-update-check.timer microos-update-boot.path "${tests[@]}"; do
+  microos-groups.service microos-etc-carry.service microos-update-check.timer microos-update-boot.path microos-sleep-gate.service \
+  "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
 for u in microos-groups.service microos-etc-carry.service; do
@@ -166,6 +167,7 @@ kept=(
   /usr/lib/systemd/system/microos-usb-console.service
   /usr/lib/systemd/system/microos-vpad.service
   /usr/lib/systemd/system/microos-remoteproc.service
+  /usr/lib/systemd/system/microos-sleep-gate.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
@@ -190,6 +192,7 @@ kept=(
   /usr/libexec/microos/microos-powerkey
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-sdam
+  /usr/libexec/microos/microos-sleep-gate
   /usr/libexec/microos/microos-slot
   /usr/libexec/microos/microos-steam-seed
   /usr/libexec/microos/microos-stub
