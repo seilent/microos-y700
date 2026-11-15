@@ -134,6 +134,8 @@ done
 
 reset
 run --deployment "$A" || fail "update: $(cat "$tmp/out")"
+[[ $(cat "$FAKE_STATE/inhibit.log") == "--what=sleep:shutdown --mode=block --who=microos-bootimg-update --why=writing boot_b $tool --tree $t --deployment $A" ]] \
+  || fail "update sleep block: $(cat "$FAKE_STATE/inhibit.log")"
 new=$MICROOS_ESP/microos/boot-new.img
 prev=$MICROOS_ESP/microos/boot-prev.img
 nid=$(sed -n 's/^armed=//p' "$MICROOS_STATEDIR/bootimg-update")
@@ -174,7 +176,9 @@ grep "^dd " "$FAKE_STATE/events" | sed -n 2p | grep -q ' skip=4096 seek=4096 ' |
 grep "^dd " "$FAKE_STATE/events" | sed -n 3p | grep -q ' count=1 ' || fail "header page write: $(grep '^dd ' "$FAKE_STATE/events")"
 cp "$new" "$tmp/first.img"
 
+rm -f "$FAKE_STATE/inhibit.log"
 run --status || fail "status: $(cat "$tmp/out")"
+[[ ! -e $FAKE_STATE/inhibit.log ]] || fail "status took the sleep block"
 for l in "running $RUN" "boot_b $nid" "prev $RUN" "record target=$A" "record armed=$nid" "disk /dev/sdz block 4096"; do
   grep -qxF "$l" "$tmp/out" || fail "status lacks '$l': $(cat "$tmp/out")"
 done
@@ -182,6 +186,8 @@ done
 : > "$FAKE_STATE/slot.log"
 : > "$FAKE_STATE/events"
 run --restore-prev || fail "undo before the reboot: $(cat "$tmp/out")"
+[[ $(cat "$FAKE_STATE/inhibit.log") == "--what=sleep:shutdown --mode=block --who=microos-bootimg-update --why=writing boot_b $tool --tree $t --restore-prev" ]] \
+  || fail "restore sleep block: $(cat "$FAKE_STATE/inhibit.log")"
 same "$MICROOS_BOOT_B" "$runimg" || fail "undo before the reboot: boot_b is not boot-prev.img"
 [[ $(cat "$MICROOS_STATEDIR/bootimg-update") == "target=$A"$'\n'"armed=$RUN"$'\n'"prev=$RUN"$'\n'"confirmed=$RUN" ]] \
   || fail "undo record: $(cat "$MICROOS_STATEDIR/bootimg-update")"
@@ -313,7 +319,10 @@ refused "unknown deployment" "is not a deployment" --deployment "$(c d).0"
 reset
 jq '.deployments[] |= (del(.stateroot) | .osname = "default")' "$FAKE_STATE/status.json" > "$tmp/osname.json"
 mv -f "$tmp/osname.json" "$FAKE_STATE/status.json"
-run --deployment "$A" || fail "osname: $(cat "$tmp/out")"
+FAKE_LOGIND_RC=3 run --deployment "$A" || fail "osname: $(cat "$tmp/out")"
+[[ ! -e $FAKE_STATE/inhibit.log ]] || fail "sleep block taken without logind: $(cat "$FAKE_STATE/inhibit.log")"
+grep -qxF 'microos-bootimg-update: systemd-logind is not running, writing boot_b without a sleep block' "$tmp/out" \
+  || fail "no line for the write without logind: $(cat "$tmp/out")"
 reset
 rm "$ent/ostree-1-default.conf"
 refused "no BLS entry" "no BLS entry" --deployment "$N"
@@ -435,6 +444,8 @@ reset
 st "$A bp" "$N"
 printf '\005' | put "$MICROOS_NVMEM_ROOT/spmi_sdam1/nvmem" 72
 trun --test "$oimg" || fail "test: $(cat "$tmp/out")"
+[[ $(cat "$FAKE_STATE/inhibit.log") == "--what=sleep:shutdown --mode=block --who=microos-bootimg-update --why=writing boot_b $dtool --tree ${TREE:-$D} --test $oimg" ]] \
+  || fail "test sleep block: $(cat "$FAKE_STATE/inhibit.log")"
 same "$MICROOS_BOOT_B" "$oimg" || fail "test: boot_b is not the test image"
 same "$MICROOS_ESP/microos/boot-prev.img" "$runimg" || fail "test: boot-prev.img is not the running image"
 [[ $(cat "$MICROOS_ESP/microos/boot-prev.id") == "$RUN $(sha "$runimg")" ]] || fail "test: boot-prev.id $(cat "$MICROOS_ESP/microos/boot-prev.id")"

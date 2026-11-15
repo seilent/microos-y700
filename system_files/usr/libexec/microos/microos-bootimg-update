@@ -14,6 +14,7 @@ cmdline=${MICROOS_CMDLINE:-/proc/cmdline}
 bootb=${MICROOS_BOOT_B:-/dev/disk/by-partlabel/boot_b}
 cmdmax=440
 
+args=("$@")
 tree="" mode="" deploy="" from="" drill=0 img="" replace=0
 while (( $# )); do
   case $1 in
@@ -36,6 +37,12 @@ re='^[0-9a-f]{64}\.[0-9]+$'
 [[ -z $from || $from =~ $re ]] || die "--initrd-from is <checksum>.<serial>, got '$from'"
 from=${from:-$deploy}
 (( EUID == 0 )) || die "run as root"
+if [[ $mode != status && -z ${MICROOS_SLEEP_BLOCKED:-} ]]; then
+  if systemctl is-active -q systemd-logind; then
+    MICROOS_SLEEP_BLOCKED=1 exec systemd-inhibit --what=sleep:shutdown --mode=block --who="$me" --why="writing boot_b" "$0" "${args[@]}"
+  fi
+  say "systemd-logind is not running, writing boot_b without a sleep block"
+fi
 tree=$(realpath -e "$tree") || die "no tree $tree"
 t=${tree%/}
 if [[ $mode == test ]]; then

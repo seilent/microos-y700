@@ -564,7 +564,7 @@ pending_mk() {
 }
 wrote() {
   called tool "^lock=free inhibit=1 written=$csum_s.0 --tree $pdir --deployment $csum_s.0\$"
-  called run "^--unit=microos-bootb-write --wait --collect --quiet -p KillMode=mixed -p KillSignal=SIGCONT -p TimeoutStopSec=300 -p Nice=0 -p IOSchedulingClass=best-effort -p CPUSchedulingPolicy=other -p RequiresMountsFor=/boot /boot/efi /sysroot /var/lib/microos -p After=ostree-finalize-staged.service systemd-inhibit --what=sleep:shutdown --mode=block"
+  called run "^--unit=microos-bootb-write --wait --collect --quiet -p KillMode=mixed -p KillSignal=SIGCONT -p TimeoutStopSec=300 -p Nice=0 -p IOSchedulingClass=best-effort -p CPUSchedulingPolicy=other -p RequiresMountsFor=/boot /boot/efi /sysroot /var/lib/microos -p After=ostree-finalize-staged.service -p Environment=MICROOS_SLEEP_BLOCKED=1 systemd-inhibit --what=sleep:shutdown --mode=block"
   is written "$state/update-written" "$nid"
   is deploy "$state/update-written" "$csum_s.0"
   is digest "$state/update-written" "$1"

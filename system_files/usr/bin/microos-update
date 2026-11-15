@@ -412,7 +412,7 @@ write_bootb() {
   systemd-run --unit=microos-bootb-write --wait --collect --quiet -p KillMode=mixed -p KillSignal=SIGCONT \
     -p TimeoutStopSec=300 -p Nice=0 -p IOSchedulingClass=best-effort -p CPUSchedulingPolicy=other \
     -p "RequiresMountsFor=/boot /boot/efi /sysroot /var/lib/microos" -p After=ostree-finalize-staged.service \
-    systemd-inhibit --what=sleep:shutdown --mode=block --who="$me" --why="writing boot_b" \
+    -p Environment=MICROOS_SLEEP_BLOCKED=1 systemd-inhibit --what=sleep:shutdown --mode=block --who="$me" --why="writing boot_b" \
     "$tool" --tree "$dir" --deployment "$staged_id" || rc=$?
   nheld=$(bootb_word "$bootb" microos.deploy 2> /dev/null) || nheld=""
   nhid=$(bootb_word "$bootb" microos.id 2> /dev/null) || nhid=""
