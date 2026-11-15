@@ -58,7 +58,7 @@ want=$(printf '%s\n' microos-boot-ok.service microos-provision.service microos-u
   microos-update-check.service microos-update-check.timer microos-boot-deadline.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-bootlog-efi.service microos-grow-root.service microos-usb-console.service microos-vpad.service \
   microos-remoteproc.service microos-groups.service microos-etc-carry.service microos-update-boot.path \
-  microos-update-boot.service microos-bdaddr@.service microos-sleep-gate.service "${tests[@]}")
+  microos-update-boot.service microos-bdaddr@.service microos-sleep-gate.service microos-typec-sink.service "${tests[@]}")
 units=()
 for u in /usr/lib/systemd/system/microos-*; do
   [[ -f $u ]] && units+=("$u")
@@ -68,7 +68,7 @@ got=$(printf '%s\n' "${units[@]##*/}" | LC_ALL=C sort)
 for u in microos-boot-ok.service microos-provision.service microos-update-applied.service microos-boot-deadline.timer \
   microos-bootlog-efi.path microos-grow-root.service microos-usb-console.service microos-vpad.service microos-remoteproc.service \
   microos-groups.service microos-etc-carry.service microos-update-check.timer microos-update-boot.path microos-sleep-gate.service \
-  "${tests[@]}"; do
+  microos-typec-sink.service "${tests[@]}"; do
   [[ $(systemctl is-enabled "$u") == enabled ]] || fail "$u is not enabled"
 done
 for u in microos-groups.service microos-etc-carry.service; do
@@ -169,6 +169,7 @@ kept=(
   /usr/lib/systemd/system/microos-vpad.service
   /usr/lib/systemd/system/microos-remoteproc.service
   /usr/lib/systemd/system/microos-sleep-gate.service
+  /usr/lib/systemd/system/microos-typec-sink.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
   /usr/lib/systemd/system-sleep/microos-sleep-log
@@ -205,6 +206,7 @@ kept=(
   /usr/libexec/microos/microos-stub
   /usr/libexec/microos/microos-stub-pack
   /usr/libexec/microos/microos-test
+  /usr/libexec/microos/microos-typec-sink
   /usr/libexec/microos/microos-update-applied
   /usr/libexec/microos/microos-usb-console
   /usr/libexec/microos/microos-vpad
@@ -291,7 +293,8 @@ payload=$(( $(sed -n 's/^MICROOS_STUB_PAYLOAD=//p' /usr/lib/microos/stub.conf) )
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad microos-powerkey microos-gameidle microos-remoteproc microos-bootimg-update microos-stub-pack; do
+for f in microos-slot microos-usb-console microos-vpad microos-powerkey microos-gameidle microos-remoteproc microos-bootimg-update microos-stub-pack \
+  microos-typec-sink; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad

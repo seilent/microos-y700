@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seilent <github@seilent.net>
+Date: Mon, 16 Nov 2026 05:50:05 +0900
+Subject: [PATCH] usb: typec: ucsi: Support changing the port type
+
+Let user space set the port type of a dual role connector through the
+port_type attribute. The driver sends SET_UOM: source makes the
+connector a DFP that presents Rp only, sink a UFP that presents Rd
+only, and dual a DRP. It needs the optional SET_UOM feature of the PPM.
+
+From UCSI 2.0 the command is SET_CCOM and also carries the operation
+modes the connector accepts, so it is left to UCSI 1.x PPMs for now.
+
+Signed-off-by: seilent <github@seilent.net>
+---
+ drivers/usb/typec/ucsi/ucsi.c | 34 +++++++++++++++++++++++++++++++++-
+ drivers/usb/typec/ucsi/ucsi.h |  4 ++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
+index 5aab8ab9f..9f990746b 100644
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -1792,9 +1792,41 @@ out_unlock:
+ 	return ret;
+ }
+ 
++static int ucsi_port_type_set(struct typec_port *port, enum typec_port_type type)
++{
++	struct ucsi_connector *con = typec_get_drvdata(port);
++	u64 command;
++	int ret;
++
++	if (con->ucsi->version >= UCSI_VERSION_2_0 ||
++	    !(con->ucsi->cap.features & UCSI_CAP_SET_UOM))
++		return -EOPNOTSUPP;
++
++	command = UCSI_SET_CCOM | UCSI_CONNECTOR_NUMBER(con->num);
++
++	switch (type) {
++	case TYPEC_PORT_SRC:
++		command |= UCSI_SET_CCOM_RP;
++		break;
++	case TYPEC_PORT_SNK:
++		command |= UCSI_SET_CCOM_RD;
++		break;
++	default:
++		command |= UCSI_SET_CCOM_DRP;
++		break;
++	}
++
++	mutex_lock(&con->lock);
++	ret = ucsi_role_cmd(con, command);
++	mutex_unlock(&con->lock);
++
++	return ret < 0 ? ret : 0;
++}
++
+ static const struct typec_operations ucsi_ops = {
+ 	.dr_set = ucsi_dr_swap,
+-	.pr_set = ucsi_pr_swap
++	.pr_set = ucsi_pr_swap,
++	.port_type_set = ucsi_port_type_set,
+ };
+ 
+ /* Caller must call fwnode_handle_put() after use */
+diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
+index 1996f04ed..a5e6a57b3 100644
+--- a/drivers/usb/typec/ucsi/ucsi.h
++++ b/drivers/usb/typec/ucsi/ucsi.h
+@@ -185,6 +185,10 @@ void ucsi_connector_change(struct ucsi *ucsi, u8 num);
+ #define UCSI_SET_PDR_ROLE(_r_)		(((_r_) == TYPEC_SOURCE ? 1 : 2) << 23)
+ #define UCSI_SET_PDR_ACCEPT_ROLE_SWAPS		BIT(25)
+ 
++#define UCSI_SET_CCOM_RP			BIT(23)
++#define UCSI_SET_CCOM_RD			BIT(24)
++#define UCSI_SET_CCOM_DRP			BIT(25)
++
+ /* GET_ALTERNATE_MODES command bits */
+ #define UCSI_ALTMODE_RECIPIENT(_r_)		(((_r_) >> 16) & 0x7)
+ #define UCSI_GET_ALTMODE_RECIPIENT(_r_)		((u64)(_r_) << 16)
+-- 
+2.43.0
+

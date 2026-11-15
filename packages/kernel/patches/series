@@ -26,5 +26,6 @@
 0040-ASoC-qcom-sc8280xp-Set-up-the-Lenovo-Legion-Y700-202.patch
 0050-dt-bindings-usb-Add-GPIO-controlled-USB-2.0-port-mul.patch
 0051-usb-roles-Add-GPIO-controlled-USB-2.0-port-multiplex.patch
+0052-usb-typec-ucsi-Support-changing-the-port-type.patch
 0060-serial-qcom-geni-Clear-pending-IRQs-while-suspended.patch
 0070-power-supply-qcom_battmgr-Invert-the-battery-current.patch

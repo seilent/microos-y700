@@ -1,0 +1,160 @@
+#!/usr/bin/python3
+import os
+import select
+import shlex
+import subprocess
+import sys
+import time
+
+ME = "microos-typec-sink"
+ROOT = os.environ.get("MICROOS_TYPEC_ROOT", "/sys/class/typec")
+STATE = os.environ.get("MICROOS_TYPEC_STATE", "/run/microos-typec-sink")
+PORTS = os.environ.get("MICROOS_TYPEC_SINK_PORTS", "port0").split()
+MONITOR = shlex.split(os.environ.get("MICROOS_TYPEC_MONITOR", "udevadm monitor --kernel --subsystem-match=typec"))
+TRY_S = float(os.environ.get("MICROOS_TYPEC_SINK_TRY", "1.5"))
+
+
+def log(msg):
+    print(f"{ME}: {msg}", file=sys.stderr, flush=True)
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def selected(value):
+    for word in value.split():
+        if word.startswith("[") and word.endswith("]"):
+            return word[1:-1]
+    return value
+
+
+class Port:
+    def __init__(self, name):
+        self.name = name
+        self.dir = os.path.join(ROOT, name)
+        self.partner = os.path.join(ROOT, f"{name}-partner")
+        self.statefile = os.path.join(STATE, name)
+        self.deadline = None
+        self.broken = False
+        self.state = read(self.statefile)
+
+    def save(self, state):
+        self.state = state
+        try:
+            with open(self.statefile, "w") as f:
+                f.write(state)
+        except OSError as e:
+            log(f"{self.name}: state: {e}")
+
+    def attached(self):
+        return os.path.isdir(self.partner)
+
+    def role(self):
+        return selected(read(os.path.join(self.dir, "power_role")))
+
+    def port_type(self):
+        return selected(read(os.path.join(self.dir, "port_type")))
+
+    def accessory(self):
+        return read(os.path.join(self.partner, "accessory_mode")) not in ("", "none")
+
+    def set_type(self, kind):
+        try:
+            with open(os.path.join(self.dir, "port_type"), "w") as f:
+                f.write(kind)
+        except OSError as e:
+            log(f"{self.name}: port_type {kind}: {e}, leaving the port as it is")
+            self.broken = True
+            return False
+        return True
+
+    def start(self, now):
+        if not self.state:
+            self.save("idle")
+            if self.attached():
+                self.added(now)
+        elif self.state == "trying":
+            self.deadline = now
+        self.reconcile(now)
+
+    def added(self, now):
+        if self.broken or self.state != "idle" or not os.path.isdir(self.dir):
+            return
+        if self.role() == "source" and not self.accessory() and self.set_type("sink"):
+            log(f"{self.name}: attached as source, trying sink")
+            self.save("trying")
+            self.deadline = now + TRY_S
+
+    def removed(self):
+        if self.state in ("held", "fallback"):
+            self.save("idle")
+
+    def reconcile(self, now):
+        if self.broken or not os.path.isdir(self.dir):
+            return
+        if self.state == "trying":
+            if self.attached() and self.role() == "sink":
+                log(f"{self.name}: attached as sink")
+                self.save("held")
+                self.deadline = None
+            elif now >= self.deadline:
+                log(f"{self.name}: no source partner, back to dual")
+                self.deadline = None
+                if self.set_type("dual"):
+                    self.save("fallback")
+        elif not self.attached() and self.port_type() != "dual" and self.set_type("dual"):
+            self.save("idle")
+
+
+def events(buf):
+    for line in buf.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0].startswith("KERNEL"):
+            yield parts[1], os.path.basename(parts[2])
+
+
+def main():
+    os.makedirs(STATE, exist_ok=True)
+    ports = {p: Port(p) for p in PORTS}
+    mon = subprocess.Popen(MONITOR, stdout=subprocess.PIPE)
+    fd = mon.stdout.fileno()
+    header = b""
+    while b"\n\n" not in header:
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            log("monitor exited")
+            return 1
+        header += chunk
+    now = time.monotonic()
+    for p in ports.values():
+        p.start(now)
+    rest = header.split(b"\n\n", 1)[1]
+    while True:
+        now = time.monotonic()
+        for action, dev in events(rest.decode(errors="replace")):
+            for p in ports.values():
+                if dev == f"{p.name}-partner":
+                    if action == "add":
+                        p.added(now)
+                    elif action == "remove":
+                        p.removed()
+        for p in ports.values():
+            p.reconcile(now)
+        deadlines = [p.deadline for p in ports.values() if p.deadline is not None]
+        timeout = max(0.0, min(deadlines) - time.monotonic()) if deadlines else None
+        ready, _, _ = select.select([fd], [], [], timeout)
+        rest = b""
+        if ready:
+            rest = os.read(fd, 65536)
+            if not rest:
+                log("monitor exited")
+                return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
