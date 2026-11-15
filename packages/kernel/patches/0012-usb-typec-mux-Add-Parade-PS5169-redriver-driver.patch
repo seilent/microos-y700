@@ -12,13 +12,17 @@ DisplayPort modes and the chip's HPD input follows the sink's HPD
 state. It registers a DRM AUX bridge so the DisplayPort controller
 chains through it to the connector.
 
+A switch or retimer change that comes while the system sleeps, such
+as a Type-C event handled before the I2C controller resumes, is kept
+and written to the chip at resume.
+
 Signed-off-by: seilent <github@seilent.net>
 ---
  MAINTAINERS                    |   1 +
  drivers/usb/typec/mux/Kconfig  |  14 ++
  drivers/usb/typec/mux/Makefile |   1 +
- drivers/usb/typec/mux/ps5169.c | 383 +++++++++++++++++++++++++++++++++
- 4 files changed, 399 insertions(+)
+ drivers/usb/typec/mux/ps5169.c | 429 +++++++++++++++++++++++++++++++++
+ 4 files changed, 445 insertions(+)
  create mode 100644 drivers/usb/typec/mux/ps5169.c
 
 diff --git a/MAINTAINERS b/MAINTAINERS
@@ -72,10 +76,10 @@ index b4f599eb5..c775bfa12 100644
  obj-$(CONFIG_TYPEC_MUX_TUSB1046)	+= tusb1046.o
 diff --git a/drivers/usb/typec/mux/ps5169.c b/drivers/usb/typec/mux/ps5169.c
 new file mode 100644
-index 000000000..55d12777b
+index 000000000..3aa0995cb
 --- /dev/null
 +++ b/drivers/usb/typec/mux/ps5169.c
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,429 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +
 +#include <drm/bridge/aux-bridge.h>
@@ -84,6 +88,7 @@ index 000000000..55d12777b
 +#include <linux/kernel.h>
 +#include <linux/module.h>
 +#include <linux/mutex.h>
++#include <linux/pm.h>
 +#include <linux/regmap.h>
 +#include <linux/regulator/consumer.h>
 +#include <linux/usb/typec_altmode.h>
@@ -128,6 +133,8 @@ index 000000000..55d12777b
 +	unsigned int svid;
 +	bool hpd;
 +	bool dp;
++	bool suspended;
++	bool pending;
 +};
 +
 +static const struct reg_sequence ps5169_init_seq[] = {
@@ -178,6 +185,11 @@ index 000000000..55d12777b
 +
 +static int ps5169_write_hpd(struct ps5169 *ps)
 +{
++	if (ps->suspended) {
++		ps->pending = true;
++		return 0;
++	}
++
 +	return regmap_write(ps->regmap, PS5169_HPD_REG,
 +			    (ps->dp && ps->hpd) ? PS5169_HPD_HIGH : 0);
 +}
@@ -188,9 +200,7 @@ index 000000000..55d12777b
 +	bool dp = false;
 +	int ret;
 +
-+	if (ps->mode == TYPEC_STATE_SAFE) {
-+		ret = ps5169_write_mode(ps, false, false);
-+	} else if (ps->svid == USB_TYPEC_DP_SID) {
++	if (ps->mode != TYPEC_STATE_SAFE && ps->svid == USB_TYPEC_DP_SID) {
 +		switch (ps->mode) {
 +		case TYPEC_DP_STATE_C:
 +		case TYPEC_DP_STATE_E:
@@ -204,9 +214,7 @@ index 000000000..55d12777b
 +		default:
 +			return -EOPNOTSUPP;
 +		}
-+
-+		ret = ps5169_write_mode(ps, usb, dp);
-+	} else if (!ps->svid) {
++	} else if (ps->mode != TYPEC_STATE_SAFE && !ps->svid) {
 +		switch (ps->mode) {
 +		case TYPEC_MODE_USB2:
 +			break;
@@ -217,18 +225,29 @@ index 000000000..55d12777b
 +		default:
 +			return -EOPNOTSUPP;
 +		}
-+
-+		ret = ps5169_write_mode(ps, usb, false);
-+	} else {
++	} else if (ps->mode != TYPEC_STATE_SAFE) {
 +		return -EOPNOTSUPP;
 +	}
 +
++	if (ps->suspended) {
++		ps->dp = dp;
++		ps->pending = true;
++		return 0;
++	}
++
++	ret = ps5169_write_mode(ps, usb, dp);
 +	if (ret)
 +		return ret;
 +
 +	ps->dp = dp;
 +
-+	return ps5169_write_hpd(ps);
++	ret = ps5169_write_hpd(ps);
++	if (ret)
++		return ret;
++
++	ps->pending = false;
++
++	return 0;
 +}
 +
 +static int ps5169_sw_set(struct typec_switch_dev *sw, enum typec_orientation orientation)
@@ -275,7 +294,7 @@ index 000000000..55d12777b
 +
 +		ps->hpd = hpd;
 +
-+		if (old_mode == state->mode && old_svid == svid) {
++		if (!ps->pending && old_mode == state->mode && old_svid == svid) {
 +			if (old_hpd != hpd)
 +				ret = ps5169_write_hpd(ps);
 +		} else {
@@ -440,6 +459,36 @@ index 000000000..55d12777b
 +	typec_switch_put(ps->typec_switch);
 +}
 +
++static int ps5169_suspend(struct device *dev)
++{
++	struct ps5169 *ps = dev_get_drvdata(dev);
++
++	guard(mutex)(&ps->lock);
++	ps->suspended = true;
++
++	return 0;
++}
++
++static int ps5169_resume(struct device *dev)
++{
++	struct ps5169 *ps = dev_get_drvdata(dev);
++	int ret;
++
++	guard(mutex)(&ps->lock);
++	ps->suspended = false;
++
++	if (!ps->pending)
++		return 0;
++
++	ret = ps5169_set(ps);
++	if (ret)
++		dev_err(dev, "failed to restore the mode: %d\n", ret);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(ps5169_pm_ops, ps5169_suspend, ps5169_resume);
++
 +static const struct of_device_id ps5169_of_table[] = {
 +	{ .compatible = "parade,ps5169" },
 +	{ }
@@ -450,6 +499,7 @@ index 000000000..55d12777b
 +	.driver = {
 +		.name = "ps5169",
 +		.of_match_table = ps5169_of_table,
++		.pm = pm_sleep_ptr(&ps5169_pm_ops),
 +	},
 +	.probe = ps5169_probe,
 +	.remove = ps5169_remove,
@@ -460,5 +510,5 @@ index 000000000..55d12777b
 +MODULE_DESCRIPTION("Parade PS5169 USB-C redriver driver");
 +MODULE_LICENSE("GPL");
 -- 
-2.55.0
+2.43.0
 
