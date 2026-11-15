@@ -97,7 +97,7 @@ for u in pipewire.socket pipewire-pulse.socket wireplumber.service; do
 done
 null=/usr/share/pipewire/pipewire.conf.d/90-microos-null-sink.conf
 grep -qF 'factory.name = support.null-audio-sink' "$null" && grep -qF 'priority.session = 1' "$null" || fail "$null"
-[[ $(compgen -G '/usr/lib/systemd/user/microos-*' | LC_ALL=C sort) == $'/usr/lib/systemd/user/microos-powerkey.service\n/usr/lib/systemd/user/microos-steam-seed.service' ]] \
+[[ $(compgen -G '/usr/lib/systemd/user/microos-*' | LC_ALL=C sort) == $'/usr/lib/systemd/user/microos-gameidle.service\n/usr/lib/systemd/user/microos-powerkey.service\n/usr/lib/systemd/user/microos-steam-seed.service' ]] \
   || fail "MicroOS user units: $(compgen -G '/usr/lib/systemd/user/microos-*' | tr '\n' ' ')"
 [[ $(< /usr/lib/systemd/system-preset/50-microos.preset) == 'enable microos-*' ]] || fail "50-microos.preset"
 
@@ -175,6 +175,8 @@ kept=(
   /usr/lib/systemd/system-sleep/microos-wake-reason
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/20-microos-powerkey.conf
+  /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/30-microos-gameidle.conf
+  /usr/lib/systemd/user/microos-gameidle.service
   /usr/lib/systemd/user/microos-powerkey.service
   /usr/lib/systemd/user/microos-steam-seed.service
   /usr/lib/sysusers.d/microos.conf
@@ -190,6 +192,7 @@ kept=(
   /usr/libexec/microos/microos-efi-log
   /usr/libexec/microos/microos-etc-carry
   /usr/libexec/microos/microos-fail
+  /usr/libexec/microos/microos-gameidle
   /usr/libexec/microos/microos-grow-root
   /usr/libexec/microos/microos-groups
   /usr/libexec/microos/microos-irq
@@ -288,7 +291,7 @@ payload=$(( $(sed -n 's/^MICROOS_STUB_PAYLOAD=//p' /usr/lib/microos/stub.conf) )
 nm=/usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
 [[ $(stat -c '%a %U' "$nm") == '600 root' ]] || fail "$nm mode"
 grep -qx 'method=shared' "$nm" && grep -qx 'address1=10.42.0.1/24' "$nm" || fail "$nm is not shared on 10.42.0.1/24"
-for f in microos-slot microos-usb-console microos-vpad microos-powerkey microos-remoteproc microos-bootimg-update microos-stub-pack; do
+for f in microos-slot microos-usb-console microos-vpad microos-powerkey microos-gameidle microos-remoteproc microos-bootimg-update microos-stub-pack; do
   [[ $(stat -c %a "/usr/libexec/microos/$f") == 755 ]] || fail "$f is not 755"
 done
 vpad=/usr/libexec/microos/microos-vpad
