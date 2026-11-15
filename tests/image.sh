@@ -110,7 +110,6 @@ kept=(
   /usr/lib/NetworkManager/system-connections/microos-usb0.nmconnection
   /usr/lib/bootc/install/00-microos.toml
   /usr/lib/bootc/kargs.d/10-microos.toml
-  /usr/lib/modprobe.d/microos-y700-rtc.conf
   /usr/lib/udev/rules.d/60-microos-backlight.rules
   /usr/lib/udev/rules.d/60-microos-y700-pcie-wakeup.rules
   /usr/lib/systemd/user-preset/60-microos-audio.preset
@@ -415,7 +414,9 @@ done <<< "$seedfiles"
 
 ls /usr/share/vulkan/icd.d/freedreno_icd.*.json >/dev/null 2>&1 || fail "no Turnip (freedreno) Vulkan ICD"
 [[ $(< /usr/lib/modules-load.d/microos-y700.conf) == pci-pwrctrl-pwrseq ]] || fail "modules-load.d microos-y700.conf"
-[[ $(< /usr/lib/modprobe.d/microos-y700-rtc.conf) == 'blacklist rtc_pm8xxx' ]] || fail "modprobe.d microos-y700-rtc.conf"
+! modprobe -c | grep -qE '^(blacklist|install) rtc[_-]pm8xxx( |$)' || fail "modprobe.d blacklists rtc_pm8xxx"
+find "/usr/lib/modules/$kver/kernel" -name "rtc-pm8xxx.ko*" | grep -q . || fail "rtc-pm8xxx module missing"
+grep -qx '# CONFIG_RTC_HCTOSYS is not set' "/usr/lib/modules/$kver/config" || fail "the image kernel sets RTC_HCTOSYS, rtc_pm8xxx would set the clock"
 [[ $(readlink /etc/systemd/system-generators/systemd-gpt-auto-generator) == /dev/null ]] || fail "systemd-gpt-auto-generator is not masked"
 udevadm verify --no-style /usr/lib/udev/rules.d/60-microos-backlight.rules >/dev/null 2>&1 || fail "60-microos-backlight.rules does not verify"
 rules=/usr/lib/udev/rules.d/60-microos-y700-pcie-wakeup.rules
