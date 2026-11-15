@@ -171,6 +171,8 @@ kept=(
   /usr/lib/systemd/system/microos-sleep-gate.service
   /usr/lib/systemd/system/serial-getty@ttyGS0.service.d/10-microos.conf
   /usr/lib/systemd/system/sshd.service.d/10-microos.conf
+  /usr/lib/systemd/system-sleep/microos-sleep-log
+  /usr/lib/systemd/system-sleep/microos-wake-reason
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/10-microos.conf
   /usr/lib/systemd/user/gamescope-session-plus@steam.service.d/20-microos-powerkey.conf
   /usr/lib/systemd/user/microos-powerkey.service
@@ -190,6 +192,7 @@ kept=(
   /usr/libexec/microos/microos-fail
   /usr/libexec/microos/microos-grow-root
   /usr/libexec/microos/microos-groups
+  /usr/libexec/microos/microos-irq
   /usr/libexec/microos/microos-powerkey
   /usr/libexec/microos/microos-provision
   /usr/libexec/microos/microos-sdam
@@ -355,6 +358,9 @@ compgen -G "/usr/lib/modules/$kver/kernel/drivers/hid/hid-steam.ko*" >/dev/null 
   || fail "sleep.conf.d 50-microos.conf"
 last=$(systemd-analyze cat-config systemd/sleep.conf | awk -F= '/^MemorySleepMode=/ { v = $2 } END { print v }')
 [[ $last == s2idle ]] || fail "effective MemorySleepMode is $last"
+for f in microos-sleep-log microos-wake-reason; do
+  [[ $(stat -c %a "/usr/lib/systemd/system-sleep/$f") == 755 ]] || fail "system-sleep/$f is not 755"
+done
 dtb=/usr/lib/modules/$kver/dtb/$(sed -n 's/^MICROOS_DTB=//p' /usr/lib/microos/bootimg.conf)
 [[ $(od -An -tx1 -N4 "$dtb" | tr -d ' \n') == d00dfeed ]] || fail "MICROOS_DTB $dtb is not a DTB"
 
