@@ -226,6 +226,8 @@ jobs:
           for t in bootimg bootimg-update bootok stub-lib etc-carry groups guard slot update usb-console bdaddr session steam-launcher steam-seed vpad; do
             sudo podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" "/tests/$t.sh"
           done
+          sudo podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" \
+            sh -c 'dnf -yq --setopt=install_weak_deps=False install dbus-daemon && /tests/powerkey.sh'
           sudo podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-libs.sh
 
       - name: Source RPMs

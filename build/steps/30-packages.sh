@@ -36,6 +36,7 @@ dnf -y install \
   rsync \
   dnsmasq \
   python3 \
+  python3-gobject-base \
   chrony \
   NetworkManager-wifi \
   wpa_supplicant \
