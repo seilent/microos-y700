@@ -227,7 +227,7 @@ jobs:
             sudo podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" "/tests/$t.sh"
           done
           sudo podman run --rm -e MICROOS_TREE=/ -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" \
-            sh -c 'dnf -yq --setopt=install_weak_deps=False install dbus-daemon && /tests/powerkey.sh'
+            sh -c 'dnf -yq --setopt=install_weak_deps=False install dbus-daemon && /tests/powerkey.sh && /tests/gameidle.sh'
           sudo podman run --rm -v "$PWD/tests:/tests:ro" "$IMAGE:$TAG" /tests/steam-libs.sh
 
       - name: Source RPMs
