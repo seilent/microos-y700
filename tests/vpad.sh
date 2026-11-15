@@ -39,6 +39,30 @@ check 'helper=1 word=blank key=0:1 key=80:0 key=200:1 key=260:0' \
 check 'helper=1 word=blank bl=900 word=blank' "$off"$'\nsend state off\nbl 0\nsend state off'
 check 'helper=1 word=bogus' 'microos-vpad: power key helper: unknown word '"'bogus'"
 check 'helper=1 word=blank helper=0 key=0:1 key=80:0' "$off"$'\nsend state off\nbl 1200\nungrab'
+check 'word=qam' 'qam'
+check 'helper=1 word=qam' $'qam\nsend state on'
+
+mset() { MICROOS_VPAD_MICROSET=1 check "$@"; }
+dark=$'bl_power 4\ngrab'
+mset 'key=0:1 key=80:0 key=200:1 key=260:0' ''
+mset 'helper=1 key=0:1 key=80:0 key=200:1 key=260:0' $'send down 0.000000 on\nsend down 0.200000 on\nsend double 0.200000 on'
+mset 'key=0:1 key=80:0' "$dark"
+mset 'key=0:1 key=80:0 key=1000:1 key=1050:0' "$dark"$'\nbl_power 0\nungrab'
+mset 'helper=1 word=blank word=restore' "$dark"$'\nsend state off\nbl_power 0\nungrab\nsend state on'
+mset 'helper=1 word=blank bl=900 word=blank' "$dark"$'\nsend state off\nsend state off'
+mset 'helper=1 word=blank blp=0 word=blank' "$dark"$'\nsend state off\nbl_power 4\nsend state off'
+mset 'helper=1 word=qam' $'qam\nsend state on'
+mset 'helper=1 word=blank key=0:1 key=80:0 key=200:1 key=260:0' \
+  "$dark"$'\nsend state off\nsend down 0.000000 off\nsend down 0.200000 off\nsend double 0.200000 off'
+
+pulse=$'1000 4\n1099 4\n1100 0'
+[[ $(vp qam 1000 1000 1099 1100) == "$pulse" ]] || fail "qam pulse: $(vp qam 1000 1000 1099 1100 | tr '\n' '|')"
+[[ $(MICROOS_VPAD_MICROSET=1 vp qam 1000 1000 1099 1100) == "$pulse" ]] || fail "qam pulse with MicroSet"
+for t in '900 1200 4|bl_power 0' '0 1200 4|bl_power 0'$'\nbl 1200' '900 1200 0|' '0 none 0|bl 512'; do
+  read -r level saved power <<< "${t%%|*}"
+  got=$(vp stop "$level" "$saved" "$power")
+  [[ $got == "${t#*|}" ]] || fail "stop ${t%%|*}: $(tr '\n' '|' <<< "$got")"
+done
 
 unit_of() { awk -F/ '/^0::/ { print $NF }' /proc/self/cgroup; }
 here_unit=$(unit_of)

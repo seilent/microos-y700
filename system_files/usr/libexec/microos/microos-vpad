@@ -47,6 +47,8 @@ CMD_SIDES = {0: ("left",), 1: ("right",), 2: BOTH}
 POWER = "pmic_pwrkey"
 SCREEN_INPUTS = ("Novatek NT36523 Touchscreen", "Novatek NT36523 Pen")
 BACKLIGHT = "/sys/class/backlight/ktz8866-backlight/brightness"
+BL_POWER = "/sys/class/backlight/ktz8866-backlight/bl_power"
+POWERDOWN = 4
 SAVED = "/run/microos-vpad/brightness"
 SOCKET = os.environ.get("MICROOS_VPAD_SOCKET", "/run/microos-vpad/power")
 HELPER = os.environ.get("MICROOS_VPAD_HELPER", "micro")
@@ -68,6 +70,7 @@ GRAB_WAIT_MS = 2000
 RECHECK_MS = 1000
 SCAN_MS = 5000
 TRACE = os.environ.get("MICROOS_VPAD_TRACE") == "1"
+MICROSET = os.environ.get("MICROOS_VPAD_MICROSET") == "1"
 
 
 def log(text):
@@ -234,18 +237,22 @@ class Screen:
         if self.off:
             self.wake()
         elif kind == "double":
-            self.qam(now)
+            if not MICROSET:
+                self.qam(now)
         else:
             self.sleep(now)
 
     def sleep(self, now):
-        try:
-            level = self.read()
-        except OSError as err:
-            self.say("", f"backlight: {err.strerror}")
-            return
-        self.save(level)
-        self.write(0)
+        if MICROSET:
+            self.write(POWERDOWN, BL_POWER)
+        else:
+            try:
+                level = self.read()
+            except OSError as err:
+                self.say("", f"backlight: {err.strerror}")
+                return
+            self.save(level)
+            self.write(0)
         self.off = True
         self.pending = [(name, handle, now + GRAB_WAIT_MS) for name, handle in self.inputs()]
         self.poll(now)
@@ -271,7 +278,10 @@ class Screen:
         self.pending = waiting
 
     def wake(self):
-        self.write(self.load() or DEFAULT_BRIGHTNESS)
+        if MICROSET:
+            self.write(0, BL_POWER)
+        else:
+            self.write(self.load() or DEFAULT_BRIGHTNESS)
         for _, handle, _ in self.pending:
             self.release(handle)
         for handle in self.grabbed:
@@ -283,20 +293,21 @@ class Screen:
         self.say("ungrab")
 
     def recheck(self):
+        node, dark = (BL_POWER, POWERDOWN) if MICROSET else (BACKLIGHT, 0)
         try:
-            level = self.read()
+            level = self.read(node)
         except OSError:
             return
-        if level:
-            self.write(0)
+        if level != dark:
+            self.write(dark, node)
 
-    def read(self):
-        with open(BACKLIGHT) as f:
+    def read(self, node=BACKLIGHT):
+        with open(node) as f:
             return int(f.read())
 
-    def write(self, level):
+    def write(self, level, node=BACKLIGHT):
         try:
-            fd = os.open(BACKLIGHT, os.O_WRONLY | os.O_TRUNC)
+            fd = os.open(node, os.O_WRONLY | os.O_TRUNC)
             try:
                 os.write(fd, b"%d\n" % level)
             finally:
@@ -358,16 +369,21 @@ class DryScreen(Screen):
     def __init__(self, level):
         super().__init__(lambda now: print("qam"))
         self.level = level
+        self.power = 0
         self.saved = None
         self.contact = False
         self.busy = False
 
-    def read(self):
-        return self.level
+    def read(self, node=BACKLIGHT):
+        return self.power if node == BL_POWER else self.level
 
-    def write(self, level):
-        self.level = level
-        print(f"bl {level}")
+    def write(self, level, node=BACKLIGHT):
+        if node == BL_POWER:
+            self.power = level
+            print(f"bl_power {level}")
+        else:
+            self.level = level
+            print(f"bl {level}")
 
     def save(self, level):
         self.saved = level
@@ -408,7 +424,7 @@ class Power:
 
     def gesture(self, kind, at, down):
         if self.send(f"{kind} {down / 1000:.6f} {'off' if self.screen.off else 'on'}"):
-            if kind == "double" and not self.screen.off:
+            if kind == "double" and not self.screen.off and not MICROSET:
                 self.qam(at)
             return
         if kind in ("single", "double"):
@@ -423,6 +439,8 @@ class Power:
         elif word == "restore":
             if self.screen.off:
                 self.screen.wake()
+        elif word == "qam":
+            self.qam(now)
         else:
             log(f"power key helper: unknown word {word!r}")
             return
@@ -695,8 +713,12 @@ class Daemon:
         return 0
 
 
-def restore():
-    screen = Screen(None)
+def restore(screen):
+    try:
+        if screen.read(BL_POWER):
+            screen.write(0, BL_POWER)
+    except (OSError, ValueError):
+        pass
     try:
         level = screen.read()
     except (OSError, ValueError):
@@ -759,6 +781,8 @@ def dryrun(mode, args):
                 power.command(value, 0)
             elif name == "bl":
                 screen.level = int(value)
+            elif name == "blp":
+                screen.power = int(value)
         taps.expire(math.inf)
     elif mode == "link":
         sys.stdout.reconfigure(line_buffering=True)
@@ -810,6 +834,17 @@ def dryrun(mode, args):
         value = restore_value(int(args[0]), None if args[1] == "none" else int(args[1]))
         if value is not None:
             print(value)
+    elif mode == "stop":
+        screen = DryScreen(int(args[0]))
+        screen.saved = None if args[1] == "none" else int(args[1])
+        screen.power = int(args[2])
+        restore(screen)
+    elif mode == "qam":
+        daemon = Daemon(os.open(os.devnull, os.O_WRONLY))
+        daemon.keys.command("qam", int(args[0]))
+        for at in args[1:]:
+            daemon.send(int(at))
+            print(at, daemon.report[20])
     else:
         log(f"unknown MICROOS_VPAD_DRYRUN {mode}")
         return 2
@@ -821,7 +856,7 @@ def main():
     if mode:
         return dryrun(mode, sys.argv[1:])
     if sys.argv[1:] == ["restore"]:
-        return restore()
+        return restore(Screen(None))
     try:
         uhid = os.open("/dev/uhid", os.O_RDWR | os.O_NONBLOCK)
     except OSError as err:
