@@ -24,7 +24,7 @@ Config: `tb321fu.config` holds the board lines, `microos.config` the image level
 | `0009-dt-bindings-input-awinic-aw86927-Add-AW86937.patch` | mine | `dt-validate` on the TB321FU DTBs |
 | `0010-Input-aw86927-add-support-for-AW86937.patch` | mine | both motors probe with chip ID 0x9370; `fftest` rumble and stop on both, felt, 170 Hz from the 141 sample SRAM waveform |
 | `0011-dt-bindings-usb-Add-Parade-PS5169-USB-C-redriver.patch` | mine | `dt-validate` on the TB321FU DTBs |
-| `0012-usb-typec-mux-Add-Parade-PS5169-redriver-driver.patch` | mine | typec switch and retimer registered; DP alt mode picture on a monitor; SuperSpeed link on the USB-C port |
+| `0012-usb-typec-mux-Add-Parade-PS5169-redriver-driver.patch` | mine | typec switch and retimer registered; DP alt mode picture on a monitor; SuperSpeed link on the USB-C port; a plug flip during the first s2idle of a boot logs no `Transfer while suspended` and no `failed to restore the mode`, and SuperSpeed comes up after the wake |
 | `0020-ASoC-dt-bindings-awinic-aw88395-Add-AW88461.patch` | mine | `dt-validate` on the TB321FU DTBs |
 | `0021-ASoC-codecs-aw88261-Enable-I2S-TX-in-I2SCTRL3.patch` | mine | AW88261 boards: TX feedback on I2SCTRL3 bit 6 during a stream; the register comes from the vendor PID 0x2113 table, no datasheet (unverified) |
 | `0022-ASoC-codecs-aw88261-Keep-the-volume-across-profile-c.patch` | mine | `Profile Set` to Receiver and back keeps `PCM Playback Volume` |
