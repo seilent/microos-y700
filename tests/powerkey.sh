@@ -43,6 +43,16 @@ CONF
 dbus-daemon --config-file="$tmp/system.conf" --nofork & pids+=($!)
 export DBUS_SYSTEM_BUS_ADDRESS=unix:path=$tmp/system
 for _ in {1..50}; do [[ -S $tmp/system ]] && break; sleep 0.1; done
+sed -e 's|<type>system</type>|<type>session</type>|' -e "s|$tmp/system<|$tmp/session<|" \
+  -e "s|</listen>|</listen>\n  <servicedir>$tmp/services</servicedir>|" "$tmp/system.conf" > "$tmp/session.conf"
+mkdir "$tmp/services"
+printf '%s\n' '[D-BUS Service]' Name=net.seilent.MicroSet.Overlay "Exec=/usr/bin/touch $tmp/activated" \
+  > "$tmp/services/net.seilent.MicroSet.Overlay.service"
+dbus-daemon --config-file="$tmp/session.conf" --nofork & sb=$!
+pids+=("$sb")
+session=unix:path=$tmp/session
+export DBUS_SESSION_BUS_ADDRESS=$session
+for _ in {1..50}; do [[ -S $tmp/session ]] && break; sleep 0.1; done
 
 mkdir -p "$tmp/bin" "$tmp/home/.steam"
 cat > "$tmp/bin/steam" <<STEAM
@@ -76,6 +86,7 @@ start_vpad() {
 start_helper() {
   stop "$pk"
   HOME=$tmp/home MICROOS_POWERKEY_SOCKET=$tmp/power MICROOS_POWERKEY_STEAM=$tmp/bin/steam MICROOS_POWERKEY_RESLEEP=${RESLEEP:-1} \
+    MICROOS_POWERKEY_OVERLAY=${OVERLAY:-} DBUS_SESSION_BUS_ADDRESS=${SESSION_BUS:-$session} \
     python3 "$powerkey" 2>> "$tmp/powerkey.err" & pk=$!
   pids+=("$pk")
 }
@@ -101,7 +112,24 @@ cycle() {
   sleep 0.2
 }
 said() { grep -cxF "microos-powerkey: $1" "$tmp/powerkey.err" || true; }
+ov=
+start_overlay() {
+  rm -f "$tmp/overlay.log"
+  python3 "$here/powerkey/overlay" "$tmp/overlay.log" "$@" & ov=$!
+  pids+=("$ov")
+  waitfor "$tmp/overlay.log" ready || fail "fake overlay did not start"
+}
+toggles() { count "$tmp/overlay.log" Toggle; }
+quick() {
+  gdbus call --session -d net.seilent.MicroOS.PowerKey -o /net/seilent/MicroOS/PowerKey \
+    -m net.seilent.MicroOS.PowerKey1.OpenQuickAccess 2>&1
+}
+owned() {
+  gdbus call --session -d org.freedesktop.DBus -o /org/freedesktop/DBus -m org.freedesktop.DBus.NameHasOwner \
+    net.seilent.MicroOS.PowerKey
+}
 
+start_overlay
 boot steam
 steam_on
 feed 'down now on' 'single last on'
@@ -111,8 +139,9 @@ feed 'down now on' 'hold last on'
 [[ $(calls) == 'steam -ifrunning steam://longpowerpress' ]] || fail "hold with Steam: $(calls)"
 : > "$tmp/calls.log"
 feed 'down now on' 'down now+0.2 on' 'double last on'
-[[ -z $(calls) && -z $(words) ]] || fail "double tap: $(calls) $(words)"
+[[ -z $(calls) && -z $(words) && $(toggles) == 0 ]] || fail "double tap: $(calls) $(words) $(toggles) toggles"
 [[ $(suspends) == 0 ]] || fail "suspend with Steam running"
+[[ $(owned) == '(false,)' ]] || fail "PowerKey name owned without the knob"
 steam_off
 
 feed 'down now on' 'single last on'
@@ -304,6 +333,80 @@ feed 'down now on' 'single last on'
 steam_off
 [[ $(count "$tmp/logind.log" "release sleep delay") == 0 ]] || fail "delay released by a vpad restart"
 kill -0 "$pk" 2> /dev/null || fail "helper exited: $(cat "$tmp/powerkey.err")"
+
+OVERLAY=1 boot overlay
+for _ in {1..30}; do [[ $(owned) == '(true,)' ]] && break; sleep 0.1; done
+[[ $(owned) == '(true,)' ]] || fail "PowerKey name not owned with the knob: $(cat "$tmp/powerkey.err")"
+feed 'down now on' 'down now+0.2 on' 'double last on'
+[[ $(toggles) == 1 && -z $(words) && -z $(calls) ]] || fail "double tap with the knob: $(toggles) toggles, $(words) $(calls)"
+steam_on
+feed 'down now on' 'single last on'
+feed 'down now on' 'hold last on'
+[[ $(calls) == $'steam -ifrunning steam://shortpowerpress\nsteam -ifrunning steam://longpowerpress' && $(toggles) == 1 ]] \
+  || fail "tap and hold with the knob: $(calls)"
+steam_off
+quick > /dev/null || fail "OpenQuickAccess: $(cat "$tmp/powerkey.err")"
+for _ in {1..30}; do [[ $(words) == qam ]] && break; sleep 0.1; done
+[[ $(words) == qam ]] || fail "OpenQuickAccess words: $(words)"
+stop "$ov"
+feed 'down now on' 'down now+0.2 on' 'double last on'
+[[ $(words) == 'qam qam' && $(toggles) == 1 && ! -e $tmp/activated ]] || fail "failed Toggle: $(words) $(toggles) toggles"
+start_overlay
+feed 'down now on' 'down now+0.2 on' 'double last on'
+stop "$ov"
+feed 'down now on' 'down now+0.2 on' 'double last on'
+[[ $(words) == 'qam qam qam' && $(toggles) == 1 ]] || fail "Toggle after a failed one: $(words) $(toggles) toggles"
+toggle_failed() { grep -c '^microos-powerkey: MicroSet overlay Toggle failed: ' "$tmp/powerkey.err" || true; }
+[[ $(toggle_failed) == 2 ]] || fail "Toggle failed lines: $(cat "$tmp/powerkey.err")"
+stop "$vp"
+for _ in {1..30}; do [[ $(said 'microos-vpad gone') == 1 ]] && break; sleep 0.1; done
+got=$(quick) && fail "OpenQuickAccess with vpad gone: $got"
+[[ $got == *net.seilent.MicroOS.PowerKey.Error.NoVpad* ]] || fail "OpenQuickAccess with vpad gone: $got"
+start_vpad
+for _ in {1..40}; do grep -qx connected "$tmp/vpad.log" && break; sleep 0.1; done
+grep -qx connected "$tmp/vpad.log" || fail "helper did not reconnect after vpad gone"
+start_overlay hang
+feed mute
+feed 'down now on' 'down now+0.2 on' 'double last on'
+login EmitPrepareForSleep true
+got=$(quick) && fail "OpenQuickAccess asleep: $got"
+[[ $got == *net.seilent.MicroOS.PowerKey.Error.ScreenOff* ]] || fail "OpenQuickAccess asleep: $got"
+sleep 1
+[[ $(words) == blank && $(toggles) == 1 && $(toggle_failed) == 2 ]] || fail "Toggle timeout while asleep: $(words) $(toggles) toggles"
+login EmitPrepareForSleep false
+start_vpad
+for _ in {1..40}; do grep -qx connected "$tmp/vpad.log" && break; sleep 0.1; done
+grep -qx connected "$tmp/vpad.log" || fail "helper did not reconnect after the muted vpad"
+login SetCanSuspend challenge
+sleep 1.6
+feed 'down now on' 'single last on'
+before=$(words)
+[[ $before == blank ]] || fail "blank before the dark double tap: $before"
+feed 'double now off'
+[[ $(words) == "$before" && $(toggles) == 1 ]] || fail "double tap while dark: $(words) $(toggles) toggles"
+stop "$ov"
+got=$(quick) && fail "OpenQuickAccess while dark: $got"
+[[ $got == *net.seilent.MicroOS.PowerKey.Error.ScreenOff* && $(words) == "$before" ]] || fail "OpenQuickAccess while dark: $got $(words)"
+HOME=$tmp/home MICROOS_POWERKEY_SOCKET=$tmp/none MICROOS_POWERKEY_OVERLAY=1 python3 "$powerkey" 2> "$tmp/second.err" & p2=$!
+pids+=("$p2")
+for _ in {1..30}; do grep -sqxF "microos-powerkey: net.seilent.MicroOS.PowerKey has another owner" "$tmp/second.err" && break; sleep 0.1; done
+grep -qxF "microos-powerkey: net.seilent.MicroOS.PowerKey has another owner" "$tmp/second.err" || fail "second owner: $(cat "$tmp/second.err")"
+stop "$p2"
+stop "$sb"
+for _ in {1..30}; do [[ $(said 'user bus closed, double tap opens the quick access menu') == 1 ]] && break; sleep 0.1; done
+[[ $(said 'user bus closed, double tap opens the quick access menu') == 1 ]] || fail "no user bus closed line: $(cat "$tmp/powerkey.err")"
+kill -0 "$pk" 2> /dev/null || fail "helper exited with the user bus: $(cat "$tmp/powerkey.err")"
+
+SESSION_BUS=unix:path=$tmp/nobus OVERLAY=1 boot nobus
+[[ $(grep -c '^microos-powerkey: user bus: ' "$tmp/powerkey.err") == 1 ]] || fail "no user bus line: $(cat "$tmp/powerkey.err")"
+steam_on
+feed 'down now on' 'single last on'
+feed 'down now on' 'hold last on'
+[[ $(calls) == $'steam -ifrunning steam://shortpowerpress\nsteam -ifrunning steam://longpowerpress' ]] || fail "tap and hold with no user bus: $(calls)"
+steam_off
+feed 'down now on' 'down now+0.2 on' 'double last on'
+[[ $(words) == qam ]] || fail "double tap with no user bus: $(words)"
+kill -0 "$pk" 2> /dev/null || fail "helper exited with no user bus: $(cat "$tmp/powerkey.err")"
 
 if (( rc == 0 )); then
   echo "powerkey: ok"

@@ -12,6 +12,14 @@ from gi.repository import Gio, GLib
 
 ME = "microos-powerkey"
 LOGIN1 = ("org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager")
+DBUS = ("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus")
+OVERLAY = ("net.seilent.MicroSet.Overlay", "/net/seilent/MicroSet/Overlay", "net.seilent.MicroSet.Overlay1")
+NAME = "net.seilent.MicroOS.PowerKey"
+PATH = "/net/seilent/MicroOS/PowerKey"
+IFACE = Gio.DBusNodeInfo.new_for_xml(
+    '<node><interface name="net.seilent.MicroOS.PowerKey1"><method name="OpenQuickAccess"/></interface></node>'
+).interfaces[0]
+USE_OVERLAY = os.environ.get("MICROOS_POWERKEY_OVERLAY") == "1"
 SOCKET = os.environ.get("MICROOS_POWERKEY_SOCKET", "/run/microos-vpad/power")
 STEAM = os.environ.get("MICROOS_POWERKEY_STEAM", "/usr/bin/steam")
 RESLEEP_S = float(os.environ.get("MICROOS_POWERKEY_RESLEEP", "10"))
@@ -26,6 +34,9 @@ RECONNECT_S = 2
 MAX_BACKOFF_S = 60
 CONNECT_S = 1
 BLANK_WAIT_MS = 1000
+TOGGLE_MS = 1000
+DO_NOT_QUEUE = 4
+PRIMARY_OWNER = 1
 
 
 def log(msg):
@@ -50,6 +61,8 @@ def client_running():
 class Powerkey:
     def __init__(self, system):
         self.system = system
+        self.session = None
+        self.toggle_logged = False
         self.conn = None
         self.failing = False
         self.fresh = False
@@ -200,7 +213,11 @@ class Powerkey:
                 self.used = down
                 self.key_wake()
             return
-        if down == self.used or self.asleep() or self.is_wake(down) or kind == "double":
+        if down == self.used or self.asleep() or self.is_wake(down):
+            return
+        if kind == "double":
+            if USE_OVERLAY and not self.off:
+                self.toggle()
             return
         if self.off:
             self.key_wake()
@@ -247,6 +264,69 @@ class Powerkey:
             GLib.spawn_async(argv, flags=GLib.SpawnFlags.SEARCH_PATH)
         except GLib.Error as err:
             log(f"{' '.join(argv)} failed: {err.message}")
+
+    def toggle(self):
+        if self.session is None:
+            self.send("qam")
+            return
+        self.session.call(
+            *OVERLAY, "Toggle", None, None, Gio.DBusCallFlags.NO_AUTO_START, TOGGLE_MS, None, self.toggled, None,
+        )
+
+    def toggled(self, bus, result, _data):
+        try:
+            bus.call_finish(result)
+        except GLib.Error as err:
+            if not self.toggle_logged:
+                log(f"MicroSet overlay Toggle failed: {err.message}")
+                self.toggle_logged = True
+            if not self.off and not self.asleep():
+                self.send("qam")
+            return
+        self.toggle_logged = False
+
+    def own(self):
+        Gio.bus_get(Gio.BusType.SESSION, None, self.got_bus, None)
+
+    def got_bus(self, _source, result, _data):
+        try:
+            bus = Gio.bus_get_finish(result)
+        except GLib.Error as err:
+            log(f"user bus: {err.message}, double tap opens the quick access menu")
+            return
+        bus.set_exit_on_close(False)
+        bus.connect("closed", self.bus_closed)
+        self.session = bus
+        try:
+            bus.register_object_with_closures2(PATH, IFACE, self.method_call, None, None)
+        except GLib.Error as err:
+            log(f"{NAME}: {err.message}")
+            return
+        bus.call(
+            *DBUS, "RequestName", GLib.Variant("(su)", (NAME, DO_NOT_QUEUE)), GLib.VariantType("(u)"),
+            Gio.DBusCallFlags.NONE, 2000, None, self.named, None,
+        )
+
+    def named(self, bus, result, _data):
+        try:
+            got = bus.call_finish(result).unpack()[0]
+        except GLib.Error as err:
+            log(f"{NAME}: {err.message}")
+            return
+        if got != PRIMARY_OWNER:
+            log(f"{NAME} has another owner")
+
+    def bus_closed(self, _bus, _remote, _err):
+        self.session = None
+        log("user bus closed, double tap opens the quick access menu")
+
+    def method_call(self, _conn, _sender, _path, _iface, _method, _params, invocation):
+        if self.off or self.asleep():
+            invocation.return_dbus_error(f"{NAME}.Error.ScreenOff", "the screen is off")
+        elif self.send("qam"):
+            invocation.return_value(None)
+        else:
+            invocation.return_dbus_error(f"{NAME}.Error.NoVpad", "microos-vpad is not connected")
 
     def key_wake(self):
         self.dark_wakes = []
@@ -360,6 +440,8 @@ def main():
         LOGIN1[0], LOGIN1[2], "PrepareForSleep", LOGIN1[1], None, Gio.DBusSignalFlags.NONE, daemon.prepare_for_sleep,
     )
     daemon.take_delay()
+    if USE_OVERLAY:
+        daemon.own()
     daemon.connect()
     GLib.MainLoop().run()
     return 1
