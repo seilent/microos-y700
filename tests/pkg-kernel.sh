@@ -41,10 +41,12 @@ done
 grep -qE '^CONFIG_LSM="([^"]*,)?yama(,[^"]*)?"$' "$kdir/config" || { echo "pkg-kernel: CONFIG_LSM lacks yama: $(grep '^CONFIG_LSM=' "$kdir/config")" >&2; exit 1; }
 grep -qx 'CONFIG_PANIC_TIMEOUT=10' "$kdir/config" || { echo "pkg-kernel: CONFIG_PANIC_TIMEOUT is not 10: $(grep '^CONFIG_PANIC_TIMEOUT=' "$kdir/config")" >&2; exit 1; }
 grep -qx '# CONFIG_RTC_DRV_EFI is not set' "$kdir/config" || { echo "pkg-kernel: CONFIG_RTC_DRV_EFI is set" >&2; exit 1; }
+grep -qx '# CONFIG_RTC_HCTOSYS is not set' "$kdir/config" || { echo "pkg-kernel: CONFIG_RTC_HCTOSYS is set" >&2; exit 1; }
+grep -qx 'CONFIG_GUNYAH_WATCHDOG=y' "$kdir/config" || { echo "pkg-kernel: CONFIG_GUNYAH_WATCHDOG is not built in" >&2; exit 1; }
 
 for m in snd-seq joydev hid-playstation hid-sony hid-nintendo xpad zram exfat ntfs3 nfnetlink_log btrfs nvmem_qcom-spmi-sdam \
   snd-soc-wcd939x novatek-nt36523 aw86927 snd-soc-aw88261 snd-soc-sc8280xp \
-  qcom_battmgr snd-soc-wcd939x-sdw soundwire-qcom snd-soc-lpass-rx-macro snd-soc-lpass-tx-macro; do
+  qcom_battmgr snd-soc-wcd939x-sdw soundwire-qcom snd-soc-lpass-rx-macro snd-soc-lpass-tx-macro rtc-pm8xxx; do
   find "$kdir" -name "$m.ko*" | grep -q . || { echo "pkg-kernel: module $m missing" >&2; exit 1; }
 done
 
