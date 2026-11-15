@@ -808,8 +808,6 @@
 	vdda-supply = <&vreg_l3i_1p2>;
 	qcom,dual-dsi-mode;
 	qcom,sync-dual-dsi;
-	assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
-				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
 
 	status = "okay";
 };
